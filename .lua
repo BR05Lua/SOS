@@ -447,7 +447,7 @@ RunService.RenderStepped:Connect(function(dt)
 	-- Opposite tilt, 90 degrees when moving, small idle tilt otherwise
 	local forwardTiltAngle
 	if moveMagnitude > 0.1 then
-		forwardTiltAngle = -math.rad(90)
+		forwardTiltAngle = -math.rad(85)
 	else
 		forwardTiltAngle = -math.rad(10)
 	end
