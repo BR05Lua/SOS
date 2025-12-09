@@ -54,7 +54,7 @@ controlLabel.Parent = controlGui
 -- ANIMATIONS
 ------------------------------------------------------------------
 local FLOAT_ID = "rbxassetid://88138077358201"
-local FLY_ID   = "rbxassetid://139178099264468"
+local FLY_ID   = "rbxassetid://131217573719045"
 
 local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
 
