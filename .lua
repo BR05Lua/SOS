@@ -38,6 +38,26 @@ local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 
+------------------------------------------------------------------
+-- ANIMATIONS
+------------------------------------------------------------------
+local FLOAT_ID = "rbxassetid://119810104205917"
+local FLY_ID   = "rbxassetid://86083258777928"
+
+local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+
+local floatAnim = Instance.new("Animation")
+floatAnim.AnimationId = FLOAT_ID
+local floatTrack = animator:LoadAnimation(floatAnim)
+floatTrack.Priority = Enum.AnimationPriority.Action
+floatTrack.Looped = true
+
+local flyAnim = Instance.new("Animation")
+flyAnim.AnimationId = FLY_ID
+local flyTrack = animator:LoadAnimation(flyAnim)
+flyTrack.Priority = Enum.AnimationPriority.Action
+flyTrack.Looped = true
+
 --------------------------------------------------------------------
 -- STATE
 --------------------------------------------------------------------
