@@ -23,6 +23,15 @@
 -- SERVICES
 --------------------------------------------------------------------
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local lp = Players.LocalPlayer
+local char = lp.Character or lp.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local root = char:WaitForChild("HumanoidRootPart")
+local cam = workspace.CurrentCamera
+
+local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
