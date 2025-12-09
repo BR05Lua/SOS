@@ -18,7 +18,169 @@
         * Walk/run sounds muted while flying, restored after
     If this script explodes, it's probably you. - me
 ]]
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
 
+local lp = Players.LocalPlayer
+local char = lp.Character or lp.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local root = char:WaitForChild("HumanoidRootPart")
+local cam = workspace.CurrentCamera
+
+------------------------------------------------------------------
+-- UI CONTROLS LABEL (NEW)
+------------------------------------------------------------------
+local pg = lp:WaitForChild("PlayerGui")
+local controlGui = Instance.new("ScreenGui")
+controlGui.Name = "BR05FlightControls"
+controlGui.ResetOnSpawn = false
+controlGui.Parent = pg
+
+local controlLabel = Instance.new("TextLabel")
+controlLabel.BackgroundTransparency = 1
+controlLabel.Size = UDim2.new(0,400,0,30)
+controlLabel.Position = UDim2.new(0.5,-200,0,0)
+controlLabel.Text = "F = Fly   •   WASD + Q/E move"
+controlLabel.TextColor3 = Color3.fromRGB(0,0,0)
+controlLabel.Font = Enum.Font.GothamBold
+controlLabel.TextSize = 18
+controlLabel.TextStrokeTransparency = 1
+controlLabel.Parent = controlGui
+------------------------------------------------------------------
+
+
+------------------------------------------------------------------
+-- ANIMATIONS
+------------------------------------------------------------------
+local FLOAT_ID = "rbxassetid://119810104205917"
+local FLY_ID   = "rbxassetid://86083258777928"
+
+local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+
+local floatAnim = Instance.new("Animation")
+floatAnim.AnimationId = FLOAT_ID
+local floatTrack = animator:LoadAnimation(floatAnim)
+floatTrack.Priority = Enum.AnimationPriority.Action
+floatTrack.Looped = true
+
+local flyAnim = Instance.new("Animation")
+flyAnim.AnimationId = FLY_ID
+local flyTrack = animator:LoadAnimation(flyAnim)
+flyTrack.Priority = Enum.AnimationPriority.Action
+flyTrack.Looped = true
+
+
+------------------------------------------------------------------
+-- FLIGHT
+------------------------------------------------------------------
+local flying = false
+local BV, BG
+
+local flySpeed = 200
+local currentVel = Vector3.new()
+local currentGyro = nil
+
+local function startFlight()
+	if flying then return end
+	flying = true
+	hum.PlatformStand = true
+
+	BG = Instance.new("BodyGyro")
+	BG.MaxTorque = Vector3.new(1e5,1e5,1e5)
+	BG.P = 1e5
+	BG.CFrame = root.CFrame
+	BG.Parent = root
+
+	BV = Instance.new("BodyVelocity")
+	BV.MaxForce = Vector3.new(1e5,1e5,1e5)
+	BV.Parent = root
+
+	floatTrack:Play(0.3)
+end
+
+local function stopFlight()
+	if not flying then return end
+	flying = false
+	
+	floatTrack:Stop(0.3)
+	flyTrack:Stop(0.3)
+
+	hum.PlatformStand = false
+
+	if BG then BG:Destroy() end
+	if BV then BV:Destroy() end
+end
+
+
+------------------------------------------------------------------
+-- UPDATE LOOP
+------------------------------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+	if not flying then return end
+	
+	local dir = Vector3.new()
+
+	if UIS:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
+	if UIS:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector end
+	if UIS:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
+	if UIS:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
+	
+	if UIS:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.new(0,1,0) end
+	if UIS:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.new(0,1,0) end
+	
+	local moving = dir.Magnitude > 0
+	
+	if moving then
+		dir = dir.Unit
+		
+		local targetVel = dir * flySpeed
+		currentVel = currentVel:Lerp(targetVel, dt * 6)
+		BV.Velocity = currentVel
+		
+		if not flyTrack.IsPlaying then
+			floatTrack:Stop(0.25)
+			flyTrack:Play(0.25)
+		end
+		
+		local base = CFrame.lookAt(root.Position, root.Position + dir)
+		local tilt = CFrame.Angles(-math.rad(80),0,0)
+		local target = base * tilt
+
+		if not currentGyro then currentGyro = target end
+		currentGyro = currentGyro:Lerp(target, dt * 6)
+		BG.CFrame = currentGyro
+
+	else
+		BV.Velocity = Vector3.new()
+
+		if flyTrack.IsPlaying then
+			flyTrack:Stop(0.25)
+			floatTrack:Play(0.25)
+		end
+		
+		local flat = Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z).Unit
+		local idleCF = CFrame.lookAt(root.Position, root.Position + flat)
+		local smallTilt = idleCF * CFrame.Angles(-math.rad(10),0,0)
+
+		if not currentGyro then currentGyro = smallTilt end
+		currentGyro = currentGyro:Lerp(smallTilt, dt * 6)
+		BG.CFrame = currentGyro
+	end
+end)
+
+
+------------------------------------------------------------------
+-- KEYBIND
+------------------------------------------------------------------
+UIS.InputBegan:Connect(function(i,g)
+	if g then return end
+	if i.KeyCode == Enum.KeyCode.F then
+		if flying then stopFlight() else startFlight() end
+	end
+end)
+
+wait(1)
 --------------------------------------------------------------------
 -- SERVICES
 --------------------------------------------------------------------
