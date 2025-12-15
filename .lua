@@ -25,7 +25,7 @@ local LocalPlayer = Players.LocalPlayer
 -- ANIMATION IDS
 --------------------------------------------------------------------
 local FLOAT_ID = "rbxassetid://88138077358201"
-local FLY_ID   = "rbxassetid://131217573719045"
+local FLY_ID   = "rbxassetid://85958732573849"
 
 --------------------------------------------------------------------
 -- STATE
