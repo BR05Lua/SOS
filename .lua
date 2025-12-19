@@ -1,10 +1,33 @@
---// SOS HUD (Polished Edition)
---// Single LocalScript (StarterPlayerScripts recommended)
---// Client-only UI + flight + lighting presets + VIP coil + intro
+--[[
+	SOS HUD (The Sins Of Scripting)
+	Single LocalScript (StarterPlayerScripts recommended)
 
---====================================================
--- Services
---====================================================
+	Core kept:
+	- Smooth superman-style flight (BodyGyro + BodyVelocity), tilt 85 degrees
+	- WASD movement relative to camera, Q/E up/down
+	- Footstep/run sound mute while flying
+	- Mobile Fly button (bottom-right)
+	- Top pop-down glass menu with red outline + arrow toggle (no dragging)
+
+	Fixed now:
+	- Lighting crash fixed (Atmosphere has NO .Enabled, and Sky has no .Enabled)
+	- If a lighting toggle is OFF, we destroy that SOS effect instead of toggling invalid properties
+	- Anim override saving fixed (your saved overrides now actually load properly)
+	- Intro UI removed (per request) but intro sound still plays
+	- Menu builds immediately (no 2 second delay), starts CLOSED, and opens/closes reliably
+
+	Added back:
+	- Mic up tab VIP button: gives "Better Speed Coil" (invisible tool, speed 111) if you own any VIP pass listed
+	- Button click sound on every button: 111174530730534
+
+	Note:
+	- Persistent saving across sessions needs an executor that supports writefile/readfile.
+	  Otherwise it will persist via Player Attributes during the same session.
+]]
+
+--------------------------------------------------------------------
+-- SERVICES
+--------------------------------------------------------------------
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -14,113 +37,172 @@ local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
 local MarketplaceService = game:GetService("MarketplaceService")
-local ContentProvider = game:GetService("ContentProvider")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local camera = workspace.CurrentCamera
 
---====================================================
--- Config
---====================================================
-local CONFIG = {
-	Debug = false,
-
-	Keys = {
-		ToggleMenu = Enum.KeyCode.H,
-		ToggleFly = Enum.KeyCode.F,
-	},
-
-	Intro = {
-		Enabled = true,
-		IconImage = "rbxassetid://104602392280926",
-		StartSound = "rbxassetid://1843492223",
-		Title = "SOS HUD",
-		Subtitle = "The Sins Of Scripting",
-		ShowSeconds = 2.0,
-		FadeSeconds = 0.75,
-	},
-
-	Audio = {
-		ButtonClick = "rbxassetid://111174530730534",
-		ButtonClickVolume = 0.65,
-	},
-
-	Flight = {
-		Speed = 200,
-		SpeedMin = 1,
-		SpeedMax = 1000,
-
-		VelocityLerpRate = 7.0,
-		RotationLerpRate = 7.0,
-		IdleSlowdownRate = 2.6,
-
-		TiltMovingDeg = 85,
-		TiltIdleDeg = 10,
-
-		-- Q held -> force 90 degrees down
-		-- E held -> force 0 degrees (no tilt)
-		TiltDownDeg = 90,
-		TiltNoneDeg = 0,
-
-		BodyGyro = { P = 1e5, D = 1000, MaxTorque = Vector3.new(1e5, 1e5, 1e5) },
-		BodyVel = { P = 1250, MaxForce = Vector3.new(1e5, 1e5, 1e5) },
-
-		Animations = {
-			DefaultFloat = "rbxassetid://88138077358201",
-			DefaultFly = "rbxassetid://131217573719045",
-		},
-
-		AnimSwitch = {
-			Cooldown = 0.25,
-			ToFlyThreshold = 0.22,
-			ToFloatThreshold = 0.12,
-			BlendTime = 0.25,
-		},
-	},
-
-	Player = {
-		SpeedMin = 2,
-		SpeedMax = 500,
-	},
-
-	UI = {
-		MenuSize = UDim2.new(0, 520, 0, 360),
-		HandleSize = UDim2.new(0, 520, 0, 42),
-		MenuStartClosed = true,
-		MenuShowDelaySeconds = 2.0,
-
-		MobileFlyPos = UDim2.new(1, -170, 1, -190),
-		MobileFlySize = UDim2.new(0, 140, 0, 60),
-	},
-
-	DiscordLink = "https://discord.gg/cacg7kvX",
-
-	MicUp = {
-		PlaceIds = {
-			["6884319169"] = true,
-			["15546218972"] = true,
-		},
-		VipGamepasses = {
-			[951459548] = true,
-			[28828491] = true,
-		},
-		Coil = {
-			Name = "Better Speed Coil",
-			WalkSpeed = 111,
-		},
-	},
-}
-
+--------------------------------------------------------------------
+-- CONFIG
+--------------------------------------------------------------------
+local DEBUG = false
 local function dprint(...)
-	if CONFIG.Debug then
+	if DEBUG then
 		print("[SOS HUD]", ...)
 	end
 end
 
---====================================================
--- Small utilities
---====================================================
+local DEFAULT_FLOAT_ID = "rbxassetid://88138077358201"
+local DEFAULT_FLY_ID   = "rbxassetid://131217573719045"
+
+local FLOAT_ID = DEFAULT_FLOAT_ID
+local FLY_ID   = DEFAULT_FLY_ID
+
+local menuToggleKey = Enum.KeyCode.H
+local flightToggleKey = Enum.KeyCode.F
+
+local flySpeed = 200
+local maxFlySpeed = 1000
+local minFlySpeed = 1
+
+local velocityLerpRate = 7.0
+local rotationLerpRate = 7.0
+local idleSlowdownRate = 2.6
+
+local MOVING_TILT_DEG = 85
+local IDLE_TILT_DEG = 10
+
+local MOBILE_FLY_POS = UDim2.new(1, -170, 1, -190)
+local MOBILE_FLY_SIZE = UDim2.new(0, 140, 0, 60)
+
+local MICUP_PLACE_IDS = {
+	["6884319169"] = true,
+	["15546218972"] = true,
+}
+
+local DISCORD_LINK = "https://discord.gg/cacg7kvX"
+
+-- Intro sound (no intro UI)
+local INTRO_SOUND_ID = "rbxassetid://1843492223"
+
+-- Button click sound
+local BUTTON_CLICK_SOUND_ID = "rbxassetid://111174530730534"
+local BUTTON_CLICK_VOLUME = 0.6
+
+-- Camera defaults captured on first setup
+local DEFAULT_FOV = nil
+local DEFAULT_CAM_MIN_ZOOM = nil
+local DEFAULT_CAM_MAX_ZOOM = nil
+local DEFAULT_CAMERA_SUBJECT_MODE = "Humanoid"
+local INFINITE_ZOOM = 1e9
+
+-- Saved settings key
+local SETTINGS_FILE_PREFIX = "SOS_HUD_Settings_"
+local SETTINGS_ATTR_NAME = "SOS_HUD_SETTINGS_JSON"
+
+-- VIP gamepasses
+local VIP_GAMEPASSES = {
+	951459548,
+	28828491,
+}
+
+--------------------------------------------------------------------
+-- STATE
+--------------------------------------------------------------------
+local character
+local humanoid
+local rootPart
+
+local flying = false
+local bodyGyro
+local bodyVel
+
+local currentVelocity = Vector3.new(0, 0, 0)
+local currentGyroCFrame
+
+local moveInput = Vector3.new(0, 0, 0)
+local verticalInput = 0
+
+local rightShoulder
+local defaultShoulderC0
+
+local originalRunSoundStates = {}
+
+local animator
+local floatTrack
+local flyTrack
+
+local animMode = "Float"
+local lastAnimSwitch = 0
+local ANIM_SWITCH_COOLDOWN = 0.25
+local ANIM_TO_FLY_THRESHOLD = 0.22
+local ANIM_TO_FLOAT_THRESHOLD = 0.12
+
+local VALID_ANIM_STATES = {
+	Idle = true,
+	Walk = true,
+	Run = true,
+	Jump = true,
+	Climb = true,
+	Fall = true,
+	Swim = true,
+}
+
+local stateOverrides = {
+	Idle = nil,
+	Walk = nil,
+	Run = nil,
+	Jump = nil,
+	Climb = nil,
+	Fall = nil,
+	Swim = nil,
+}
+
+local lastChosenState = "Idle"
+local lastChosenCategory = "Custom"
+
+-- Player speed
+local DEFAULT_WALKSPEED = nil
+local playerSpeed = nil
+
+-- Camera settings
+local camSubjectMode = DEFAULT_CAMERA_SUBJECT_MODE
+local camOffset = Vector3.new(0, 0, 0)
+local camFov = nil
+local camMaxZoom = INFINITE_ZOOM
+
+-- UI State
+local gui
+
+local menuFrame
+local menuHandle
+local arrowButton
+local tabsBar
+local pagesHolder
+
+local mobileFlyButton
+
+local fpsLabel
+local fpsAcc = 0
+local fpsFrames = 0
+local fpsValue = 60
+local rainbowHue = 0
+
+-- Menu tween safety
+local menuOpen = false
+local menuTween = nil
+
+-- Button sound system
+local clickSoundTemplate = nil
+local buttonSoundAttached = setmetatable({}, { __mode = "k" })
+
+-- Save debounce
+local pendingSave = false
+
+--------------------------------------------------------------------
+-- HELPERS
+--------------------------------------------------------------------
 local function notify(title, text, dur)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
@@ -137,338 +219,298 @@ local function clamp01(x)
 	return x
 end
 
+local function tween(obj, info, props)
+	local t = TweenService:Create(obj, info, props)
+	t:Play()
+	return t
+end
+
 local function safeDestroy(inst)
 	if inst and inst.Parent then
 		inst:Destroy()
 	end
 end
 
-local function toAssetIdString(v)
-	local s = tostring(v or ""):gsub("%s+", "")
+local function toAssetIdString(anyValue)
+	local s = tostring(anyValue or "")
+	s = s:gsub("%s+", "")
 	if s == "" then return nil end
-	if s:find("^rbxassetid://") then return s end
-	if s:match("^%d+$") then return "rbxassetid://" .. s end
+	if s:find("^rbxassetid://") then
+		return s
+	end
+	if s:match("^%d+$") then
+		return "rbxassetid://" .. s
+	end
+	if s:find("^http") and s:lower():find("roblox.com") and s:lower():find("id=") then
+		local id = s:match("id=(%d+)")
+		if id then return "rbxassetid://" .. id end
+	end
 	return nil
 end
 
---====================================================
--- Maid
---====================================================
-local Maid = {}
-Maid.__index = Maid
-function Maid.new()
-	return setmetatable({ _tasks = {} }, Maid)
+local function findRightShoulderMotor(char)
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("Motor6D") and part.Name == "Right Shoulder" then
+			return part
+		end
+	end
+	return nil
 end
-function Maid:Give(taskThing)
-	table.insert(self._tasks, taskThing)
-	return taskThing
+
+local function stopAllPlayingTracks(hum)
+	for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+		pcall(function()
+			tr:Stop(0)
+		end)
+	end
 end
-function Maid:Cleanup()
-	for i = #self._tasks, 1, -1 do
-		local t = self._tasks[i]
-		self._tasks[i] = nil
-		if typeof(t) == "RBXScriptConnection" then
-			pcall(function() t:Disconnect() end)
-		elseif typeof(t) == "Instance" then
-			pcall(function() t:Destroy() end)
-		elseif type(t) == "function" then
-			pcall(t)
+
+--------------------------------------------------------------------
+-- SAVE / LOAD (per UserId)
+--------------------------------------------------------------------
+local function canFileIO()
+	return (typeof(readfile) == "function") and (typeof(writefile) == "function") and (typeof(isfile) == "function")
+end
+
+local function getSettingsFileName()
+	return SETTINGS_FILE_PREFIX .. tostring(LocalPlayer.UserId) .. ".json"
+end
+
+local function encodeSettings(tbl)
+	local ok, res = pcall(function()
+		return HttpService:JSONEncode(tbl)
+	end)
+	if ok then return res end
+	return nil
+end
+
+local function decodeSettings(str)
+	local ok, res = pcall(function()
+		return HttpService:JSONDecode(str)
+	end)
+	if ok and typeof(res) == "table" then
+		return res
+	end
+	return nil
+end
+
+local function buildSettingsTable()
+	return {
+		Version = 1,
+		UserId = LocalPlayer.UserId,
+
+		FLOAT_ID = FLOAT_ID,
+		FLY_ID = FLY_ID,
+		FlySpeed = flySpeed,
+
+		PlayerSpeed = playerSpeed,
+
+		CamSubjectMode = camSubjectMode,
+		CamOffset = { camOffset.X, camOffset.Y, camOffset.Z },
+		CamFov = camFov,
+		CamMaxZoom = camMaxZoom,
+
+		AnimOverrides = stateOverrides,
+		LastAnimState = lastChosenState,
+		LastAnimCategory = lastChosenCategory,
+
+		Lighting = _G.__SOS_LightingSaveState or nil,
+	}
+end
+
+local function applySettingsTable(s)
+	if typeof(s) ~= "table" then return end
+
+	if typeof(s.FLOAT_ID) == "string" then FLOAT_ID = s.FLOAT_ID end
+	if typeof(s.FLY_ID) == "string" then FLY_ID = s.FLY_ID end
+	if typeof(s.FlySpeed) == "number" then
+		flySpeed = math.clamp(math.floor(s.FlySpeed + 0.5), minFlySpeed, maxFlySpeed)
+	end
+
+	if typeof(s.PlayerSpeed) == "number" then
+		playerSpeed = math.clamp(math.floor(s.PlayerSpeed + 0.5), 2, 500)
+	end
+
+	if typeof(s.CamSubjectMode) == "string" then camSubjectMode = s.CamSubjectMode end
+	if typeof(s.CamOffset) == "table" and #s.CamOffset >= 3 then
+		local x = tonumber(s.CamOffset[1]) or 0
+		local y = tonumber(s.CamOffset[2]) or 0
+		local z = tonumber(s.CamOffset[3]) or 0
+		camOffset = Vector3.new(x, y, z)
+	end
+	if typeof(s.CamFov) == "number" then camFov = math.clamp(s.CamFov, 40, 120) end
+	if typeof(s.CamMaxZoom) == "number" then camMaxZoom = math.clamp(s.CamMaxZoom, 5, INFINITE_ZOOM) end
+
+	if typeof(s.AnimOverrides) == "table" then
+		for k, v in pairs(s.AnimOverrides) do
+			if VALID_ANIM_STATES[k] then
+				stateOverrides[k] = v
+			end
+		end
+	end
+
+	if typeof(s.LastAnimState) == "string" and VALID_ANIM_STATES[s.LastAnimState] then
+		lastChosenState = s.LastAnimState
+	end
+	if typeof(s.LastAnimCategory) == "string" then lastChosenCategory = s.LastAnimCategory end
+
+	if typeof(s.Lighting) == "table" then
+		_G.__SOS_LightingSaveState = s.Lighting
+	end
+end
+
+local function loadSettings()
+	local raw = nil
+
+	if canFileIO() then
+		local file = getSettingsFileName()
+		if isfile(file) then
+			local ok, data = pcall(function()
+				return readfile(file)
+			end)
+			if ok and type(data) == "string" and #data > 0 then
+				raw = data
+			end
+		end
+	end
+
+	if not raw then
+		local attr = LocalPlayer:GetAttribute(SETTINGS_ATTR_NAME)
+		if type(attr) == "string" and #attr > 0 then
+			raw = attr
+		end
+	end
+
+	if raw then
+		local t = decodeSettings(raw)
+		if t then
+			applySettingsTable(t)
 		end
 	end
 end
 
---====================================================
--- UI factory
---====================================================
-local UI = {}
+local function saveSettingsNow()
+	local tbl = buildSettingsTable()
+	local json = encodeSettings(tbl)
+	if not json then return end
 
-function UI.Corner(parent, px)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, px or 12)
-	c.Parent = parent
-	return c
-end
+	if canFileIO() then
+		pcall(function()
+			writefile(getSettingsFileName(), json)
+		end)
+	end
 
-function UI.Stroke(parent, thickness, transparency)
-	local s = Instance.new("UIStroke")
-	s.Color = Color3.fromRGB(200, 40, 40)
-	s.Thickness = thickness or 2
-	s.Transparency = transparency or 0.1
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = parent
-	return s
-end
-
-function UI.Glass(frame)
-	frame.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-	frame.BackgroundTransparency = 0.18
-
-	local grad = Instance.new("UIGradient")
-	grad.Rotation = 90
-	grad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 22)),
-		ColorSequenceKeypoint.new(0.4, Color3.fromRGB(10, 10, 12)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 6, 8)),
-	})
-	grad.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.05),
-		NumberSequenceKeypoint.new(1, 0.20),
-	})
-	grad.Parent = frame
-
-	local shine = Instance.new("Frame")
-	shine.Name = "Shine"
-	shine.BackgroundTransparency = 1
-	shine.Size = UDim2.new(1, -8, 0.35, 0)
-	shine.Position = UDim2.new(0, 4, 0, 4)
-	shine.Parent = frame
-
-	local shineImg = Instance.new("ImageLabel")
-	shineImg.BackgroundTransparency = 1
-	shineImg.Size = UDim2.new(1, 0, 1, 0)
-	shineImg.Image = "rbxassetid://5028857084"
-	shineImg.ImageTransparency = 0.72
-	shineImg.Parent = shine
-
-	local shineGrad = Instance.new("UIGradient")
-	shineGrad.Rotation = 0
-	shineGrad.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.65),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	shineGrad.Parent = shineImg
-end
-
-function UI.Text(parent, txt, size, bold)
-	local t = Instance.new("TextLabel")
-	t.BackgroundTransparency = 1
-	t.Text = txt or ""
-	t.TextColor3 = Color3.fromRGB(240, 240, 240)
-	t.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
-	t.TextSize = size or 16
-	t.TextXAlignment = Enum.TextXAlignment.Left
-	t.TextYAlignment = Enum.TextYAlignment.Center
-	t.TextWrapped = true
-	t.Parent = parent
-	return t
-end
-
-local function attachButtonClickSound(btn)
-	if not btn or not btn:IsA("GuiButton") then return end
-	local s = Instance.new("Sound")
-	s.Name = "ClickSound"
-	s.SoundId = CONFIG.Audio.ButtonClick
-	s.Volume = CONFIG.Audio.ButtonClickVolume
-	s.Looped = false
-	s.Parent = btn
-
-	btn.MouseButton1Down:Connect(function()
-		pcall(function() s:Play() end)
+	pcall(function()
+		LocalPlayer:SetAttribute(SETTINGS_ATTR_NAME, json)
 	end)
 end
 
-function UI.Button(parent, txt)
-	local b = Instance.new("TextButton")
-	b.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-	b.BackgroundTransparency = 0.2
-	b.BorderSizePixel = 0
-	b.AutoButtonColor = true
-	b.Text = txt or "Button"
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 14
-	b.TextColor3 = Color3.fromRGB(245, 245, 245)
-	b.Parent = parent
-	UI.Corner(b, 10)
-
-	local st = Instance.new("UIStroke")
-	st.Color = Color3.fromRGB(200, 40, 40)
-	st.Thickness = 1
-	st.Transparency = 0.25
-	st.Parent = b
-
-	attachButtonClickSound(b)
-	return b
+local function scheduleSave()
+	if pendingSave then return end
+	pendingSave = true
+	task.delay(0.35, function()
+		pendingSave = false
+		saveSettingsNow()
+	end)
 end
 
-function UI.Input(parent, placeholder)
-	local tb = Instance.new("TextBox")
-	tb.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-	tb.BackgroundTransparency = 0.15
-	tb.BorderSizePixel = 0
-	tb.ClearTextOnFocus = false
-	tb.Text = ""
-	tb.PlaceholderText = placeholder or ""
-	tb.Font = Enum.Font.Gotham
-	tb.TextSize = 14
-	tb.TextColor3 = Color3.fromRGB(245, 245, 245)
-	tb.PlaceholderColor3 = Color3.fromRGB(170, 170, 170)
-	tb.Parent = parent
-	UI.Corner(tb, 10)
-
-	local st = Instance.new("UIStroke")
-	st.Color = Color3.fromRGB(200, 40, 40)
-	st.Thickness = 1
-	st.Transparency = 0.35
-	st.Parent = tb
-
-	return tb
-end
-
-local function setTabActive(btn, active)
-	local st = btn:FindFirstChildOfClass("UIStroke")
-	if st then
-		st.Transparency = active and 0.05 or 0.35
-		st.Thickness = active and 2 or 1
+--------------------------------------------------------------------
+-- BUTTON SOUND SYSTEM
+--------------------------------------------------------------------
+local function ensureClickSoundTemplate()
+	if clickSoundTemplate and clickSoundTemplate.Parent then
+		return clickSoundTemplate
 	end
-	btn.BackgroundTransparency = active and 0.08 or 0.22
+	if not gui then
+		return nil
+	end
+
+	local s = Instance.new("Sound")
+	s.Name = "SOS_ButtonClickTemplate"
+	s.SoundId = BUTTON_CLICK_SOUND_ID
+	s.Volume = BUTTON_CLICK_VOLUME
+	s.Looped = false
+	s.Parent = gui
+	clickSoundTemplate = s
+	return clickSoundTemplate
 end
 
---====================================================
--- Custom animations
---====================================================
-local CustomAnims = {
-	Idle = {
-		{ Name = "Tall", Id = 91348372558295 },
+local function playButtonClick()
+	local tmpl = ensureClickSoundTemplate()
+	if not tmpl then return end
 
-		{ Name = "Jonathan", Id = 120629563851640 },
-		{ Name = "Killer Queen", Id = 104714163485875 },
-		{ Name = "Dio", Id = 138467089338692 },
-		{ Name = "Dio OH", Id = 96658788627102 },
-		{ Name = "Joseph", Id = 87470625500564 },
-		{ Name = "Jolyne", Id = 97892708412696 },
-		{ Name = "Diego", Id = 127117233320016 },
-		{ Name = "Polnareff", Id = 104647713661701 },
-		{ Name = "Jotaro", Id = 134878791451155 },
-		{ Name = "Funny V", Id = 88859285630202 },
-		{ Name = "Johnny", Id = 77834689346843 },
-		{ Name = "Made in Heaven", Id = 79234770032233 },
-		{ Name = "Mahito", Id = 92585001378279 },
-		{ Name = "Honored One", Id = 139000839803032 },
-		{ Name = "Gon Rage", Id = 136678571910037 },
-		{ Name = "Sol's RNG 1", Id = 125722696765151 },
-		{ Name = "Luffy", Id = 107520488394848 },
-		{ Name = "Sans", Id = 123627677663418 },
-		{ Name = "Fake R6", Id = 96518514398708 },
-		{ Name = "Goku Warm Up", Id = 84773442399798 },
-		{ Name = "Goku UI/Mui", Id = 130104867308995 },
-		{ Name = "Goku Black", Id = 110240143520283 },
-		{ Name = "Sukuna", Id = 82974857632552 },
-		{ Name = "Toji", Id = 113657065279101 },
-		{ Name = "Isagi", Id = 135818607077529 },
-		{ Name = "Yuji", Id = 103088653217891 },
-		{ Name = "Lavinho", Id = 92045987196732 },
-		{ Name = "Ippo", Id = 76110924880592 },
-		{ Name = "Aizen", Id = 83896268225208 },
-		{ Name = "Kaneki", Id = 116671111363578 },
-		{ Name = "Tanjiro", Id = 118533315464114 },
-		{ Name = "Head Hold", Id = 129453036635884 },
-		{ Name = "Robot Perform", Id = 105174189783870 },
-
-		{ Name = "Springtrap", Id = 90257184304714 },
-		{ Name = "Hmmm Float", Id = 107666091494733 },
-		{ Name = "OG Golden Freddy", Id = 138402679058341 },
-		{ Name = "Wally West", Id = 106169111259587 },
-		{ Name = "𝓛", Id = 103267638009024 },
-		{ Name = "Robot Malfunction", Id = 110419039625879 },
-	},
-
-	Walk = {
-		{ Name = "Football/Soccer", Id = 116881956670910 },
-		{ Name = "Naruto", Id = 81851725854678 },
-		{ Name = "Animal", Id = 87721497492370 },
-		{ Name = "Fredbear", Id = 133284420439423 },
-		{ Name = "Cute Anime", Id = 106767496454996 },
-	},
-
-	Run = {
-		{ Name = "Football/Soccer", Id = 116881956670910 },
-		{ Name = "Animal", Id = 87721497492370 },
-		{ Name = "Fredbear", Id = 133284420439423 },
-		{ Name = "Cute Anime", Id = 106767496454996 },
-
-		{ Name = "Tall", Id = 134010853417610 },
-		{ Name = "Officer Earl", Id = 104646820775114 },
-		{ Name = "AOT Titan", Id = 95363958550738 },
-		{ Name = "Captain JS", Id = 87806542116815 },
-		{ Name = "Ninja Sprint", Id = 123763532572423 },
-		{ Name = "IDEK", Id = 101293881003047 },
-		{ Name = "Honored One", Id = 82260970223217 },
-		{ Name = "Head Hold", Id = 92715775326925 },
-
-		{ Name = "Robot Speed 3", Id = 128047975332475 },
-
-		{ Name = "Springtrap Sturdy", Id = 80927378599036 },
-		{ Name = "UFO", Id = 118703314621593 },
-		{ Name = "Closed Eyes Vibe", Id = 117991470645633 },
-		{ Name = "Wally West", Id = 102622695004986 },
-		{ Name = "Squidward", Id = 82365330773489 },
-		{ Name = "On A Mission", Id = 113718116290824 },
-		{ Name = "Very Happy Run", Id = 86522070222739 },
-		{ Name = "Missile", Id = 92401041987431 },
-		{ Name = "I Wanna Run Away", Id = 78510387198062 },
-	},
-}
-
-local CUSTOM_WALK_SLOW_MULT = 0.65
-local CUSTOM_WALK_MIN = 8
-
---====================================================
--- Flight Controller
---====================================================
-local Flight = {}
-Flight.__index = Flight
-
-function Flight.new()
-	return setmetatable({
-		Maid = Maid.new(),
-		Character = nil,
-		Humanoid = nil,
-		Root = nil,
-
-		Flying = false,
-		BodyGyro = nil,
-		BodyVel = nil,
-
-		MoveInput = Vector3.new(),
-		VerticalInput = 0,
-
-		CurrentVel = Vector3.new(),
-		CurrentGyroCF = nil,
-
-		RunSoundCache = {},
-
-		Animator = nil,
-		FloatTrack = nil,
-		FlyTrack = nil,
-		AnimMode = "Float",
-		LastAnimSwitch = 0,
-
-		FloatId = CONFIG.Flight.Animations.DefaultFloat,
-		FlyId = CONFIG.Flight.Animations.DefaultFly,
-
-		RightShoulder = nil,
-		DefaultShoulderC0 = nil,
-	}, Flight)
+	local s = tmpl:Clone()
+	s.Name = "SOS_ButtonClick"
+	s.Parent = gui
+	pcall(function() s:Play() end)
+	Debris:AddItem(s, 3)
 end
 
-function Flight:_findRightShoulderMotor(char)
-	for _, d in ipairs(char:GetDescendants()) do
-		if d:IsA("Motor6D") and d.Name == "Right Shoulder" then
-			return d
+local function attachSoundToButton(btn)
+	if not btn then return end
+	if buttonSoundAttached[btn] then return end
+	buttonSoundAttached[btn] = true
+
+	local okActivated = pcall(function()
+		btn.Activated:Connect(function()
+			playButtonClick()
+		end)
+	end)
+
+	if not okActivated then
+		pcall(function()
+			btn.MouseButton1Click:Connect(function()
+				playButtonClick()
+			end)
+		end)
+	end
+end
+
+local function setupGlobalButtonSounds(root)
+	if not root then return end
+
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("TextButton") or d:IsA("ImageButton") then
+			attachSoundToButton(d)
 		end
 	end
-	return nil
+
+	root.DescendantAdded:Connect(function(d)
+		if d:IsA("TextButton") or d:IsA("ImageButton") then
+			attachSoundToButton(d)
+		end
+	end)
 end
 
-function Flight:_cacheAndMuteRunSounds()
-	local char = self.Character
-	if not char then return end
-	for _, desc in ipairs(char:GetDescendants()) do
+--------------------------------------------------------------------
+-- INTRO SOUND ONLY
+--------------------------------------------------------------------
+local function playIntroSoundOnly()
+	if not gui then return end
+	local s = Instance.new("Sound")
+	s.Name = "SOS_IntroSound"
+	s.SoundId = INTRO_SOUND_ID
+	s.Volume = 0.9
+	s.Looped = false
+	s.Parent = gui
+	pcall(function() s:Play() end)
+	Debris:AddItem(s, 8)
+end
+
+--------------------------------------------------------------------
+-- FOOTSTEP SOUND CONTROL
+--------------------------------------------------------------------
+local function cacheAndMuteRunSounds()
+	if not character then return end
+	for _, desc in ipairs(character:GetDescendants()) do
 		if desc:IsA("Sound") then
-			local name = string.lower(desc.Name)
-			if name:find("run") or name:find("walk") or name:find("footstep") then
-				if not self.RunSoundCache[desc] then
-					self.RunSoundCache[desc] = { Volume = desc.Volume, Playing = desc.Playing }
+			local nameLower = string.lower(desc.Name)
+			if nameLower:find("run") or nameLower:find("walk") or nameLower:find("footstep") then
+				if not originalRunSoundStates[desc] then
+					originalRunSoundStates[desc] = {
+						Volume = desc.Volume,
+						Playing = desc.Playing,
+					}
 				end
 				desc.Volume = 0
 				desc.Playing = false
@@ -477,8 +519,8 @@ function Flight:_cacheAndMuteRunSounds()
 	end
 end
 
-function Flight:_restoreRunSounds()
-	for sound, data in pairs(self.RunSoundCache) do
+local function restoreRunSounds()
+	for sound, data in pairs(originalRunSoundStates) do
 		if sound and sound.Parent then
 			sound.Volume = data.Volume or 0.5
 			if data.Playing then
@@ -486,890 +528,213 @@ function Flight:_restoreRunSounds()
 			end
 		end
 	end
-	self.RunSoundCache = {}
 end
 
-function Flight:_loadFlightTracks()
-	local hum = self.Humanoid
-	if not hum then return end
-	if hum.RigType == Enum.HumanoidRigType.R6 then
-		self.Animator, self.FloatTrack, self.FlyTrack = nil, nil, nil
+--------------------------------------------------------------------
+-- FLIGHT ANIMS
+--------------------------------------------------------------------
+local function loadFlightTracks()
+	if not humanoid then return end
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then
+		animator = nil
+		floatTrack = nil
+		flyTrack = nil
 		return
 	end
 
-	local animator = hum:FindFirstChildOfClass("Animator")
+	animator = humanoid:FindFirstChildOfClass("Animator")
 	if not animator then
 		animator = Instance.new("Animator")
-		animator.Parent = hum
+		animator.Parent = humanoid
 	end
-	self.Animator = animator
 
-	if self.FloatTrack then pcall(function() self.FloatTrack:Stop(0) end) end
-	if self.FlyTrack then pcall(function() self.FlyTrack:Stop(0) end) end
-	self.FloatTrack, self.FlyTrack = nil, nil
+	if floatTrack then pcall(function() floatTrack:Stop(0) end) end
+	if flyTrack then pcall(function() flyTrack:Stop(0) end) end
+	floatTrack = nil
+	flyTrack = nil
 
-	local function loadTrack(animId)
+	do
 		local a = Instance.new("Animation")
-		a.AnimationId = animId
-		local ok, tr = pcall(function()
-			return animator:LoadAnimation(a)
-		end)
+		a.AnimationId = FLOAT_ID
+		local ok, tr = pcall(function() return animator:LoadAnimation(a) end)
 		if ok and tr then
-			tr.Priority = Enum.AnimationPriority.Action
-			tr.Looped = true
-			return tr
-		end
-		return nil
-	end
-
-	self.FloatTrack = loadTrack(self.FloatId)
-	self.FlyTrack = loadTrack(self.FlyId)
-
-	self.AnimMode = "Float"
-	self.LastAnimSwitch = 0
-end
-
-function Flight:_playFloat()
-	if not self.FloatTrack then return end
-	if self.FlyTrack and self.FlyTrack.IsPlaying then
-		pcall(function() self.FlyTrack:Stop(CONFIG.Flight.AnimSwitch.BlendTime) end)
-	end
-	if not self.FloatTrack.IsPlaying then
-		pcall(function() self.FloatTrack:Play(CONFIG.Flight.AnimSwitch.BlendTime) end)
-	end
-end
-
-function Flight:_playFly()
-	if not self.FlyTrack then return end
-	if self.FloatTrack and self.FloatTrack.IsPlaying then
-		pcall(function() self.FloatTrack:Stop(CONFIG.Flight.AnimSwitch.BlendTime) end)
-	end
-	if not self.FlyTrack.IsPlaying then
-		pcall(function() self.FlyTrack:Play(CONFIG.Flight.AnimSwitch.BlendTime) end)
-	end
-end
-
-function Flight:_stopFlightAnims()
-	if self.FloatTrack then pcall(function() self.FloatTrack:Stop(CONFIG.Flight.AnimSwitch.BlendTime) end) end
-	if self.FlyTrack then pcall(function() self.FlyTrack:Stop(CONFIG.Flight.AnimSwitch.BlendTime) end) end
-end
-
-function Flight:BindCharacter(char)
-	self.Character = char
-	self.Humanoid = char:WaitForChild("Humanoid")
-	self.Root = char:WaitForChild("HumanoidRootPart")
-	Camera = workspace.CurrentCamera
-
-	self.RightShoulder = self:_findRightShoulderMotor(char)
-	self.DefaultShoulderC0 = self.RightShoulder and self.RightShoulder.C0 or nil
-
-	self.RunSoundCache = {}
-	self:_loadFlightTracks()
-end
-
-function Flight:Start()
-	if self.Flying then return end
-	if not self.Humanoid or not self.Root then return end
-
-	self.Flying = true
-	self.Humanoid.PlatformStand = true
-	self:_cacheAndMuteRunSounds()
-
-	local bg = Instance.new("BodyGyro")
-	bg.P = CONFIG.Flight.BodyGyro.P
-	bg.D = CONFIG.Flight.BodyGyro.D
-	bg.MaxTorque = CONFIG.Flight.BodyGyro.MaxTorque
-	bg.CFrame = self.Root.CFrame
-	bg.Parent = self.Root
-	self.BodyGyro = bg
-
-	local bv = Instance.new("BodyVelocity")
-	bv.P = CONFIG.Flight.BodyVel.P
-	bv.MaxForce = CONFIG.Flight.BodyVel.MaxForce
-	bv.Velocity = Vector3.new()
-	bv.Parent = self.Root
-	self.BodyVel = bv
-
-	self.CurrentVel = Vector3.new()
-	self.CurrentGyroCF = self.Root.CFrame
-
-	self.AnimMode = "Float"
-	self.LastAnimSwitch = 0
-	self:_playFloat()
-end
-
-function Flight:Stop()
-	if not self.Flying then return end
-	self.Flying = false
-
-	self:_stopFlightAnims()
-
-	if self.BodyGyro then self.BodyGyro:Destroy() self.BodyGyro = nil end
-	if self.BodyVel then self.BodyVel:Destroy() self.BodyVel = nil end
-
-	if self.Humanoid then
-		self.Humanoid.PlatformStand = false
-	end
-
-	if self.RightShoulder and self.DefaultShoulderC0 then
-		self.RightShoulder.C0 = self.DefaultShoulderC0
-	end
-
-	self:_restoreRunSounds()
-end
-
-function Flight:Toggle()
-	if self.Flying then
-		self:Stop()
-	else
-		self:Start()
-	end
-end
-
-function Flight:SetSpeed(newSpeed)
-	local s = tonumber(newSpeed)
-	if not s then return end
-	s = math.clamp(s, CONFIG.Flight.SpeedMin, CONFIG.Flight.SpeedMax)
-	CONFIG.Flight.Speed = math.floor(s + 0.5)
-end
-
-function Flight:SetFloatAnim(idStr)
-	local parsed = toAssetIdString(idStr)
-	if not parsed then return false end
-	self.FloatId = parsed
-	self:_loadFlightTracks()
-	if self.Flying then
-		self:_stopFlightAnims()
-		self:_playFloat()
-	end
-	return true
-end
-
-function Flight:SetFlyAnim(idStr)
-	local parsed = toAssetIdString(idStr)
-	if not parsed then return false end
-	self.FlyId = parsed
-	self:_loadFlightTracks()
-	if self.Flying then
-		self:_stopFlightAnims()
-		self:_playFloat()
-	end
-	return true
-end
-
-function Flight:_updateInput()
-	local dir = Vector3.new()
-	if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += Vector3.new(0, 0, -1) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir += Vector3.new(0, 0, 1) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir += Vector3.new(-1, 0, 0) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += Vector3.new(1, 0, 0) end
-	self.MoveInput = dir
-
-	local v = 0
-	if UserInputService:IsKeyDown(Enum.KeyCode.E) then v += 1 end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Q) then v -= 1 end
-	self.VerticalInput = v
-end
-
-function Flight:Update(dt)
-	if not self.Flying then return end
-	if not self.Root or not self.BodyGyro or not self.BodyVel or not Camera then return end
-
-	self:_updateInput()
-
-	local camCF = Camera.CFrame
-	local camLook = camCF.LookVector
-	local camRight = camCF.RightVector
-
-	local moveDir = Vector3.new()
-	moveDir += camLook * (-self.MoveInput.Z)
-	moveDir += camRight * (self.MoveInput.X)
-	moveDir += Vector3.new(0, self.VerticalInput, 0)
-
-	local moveMagnitude = moveDir.Magnitude
-	local hasHorizontal = Vector3.new(self.MoveInput.X, 0, self.MoveInput.Z).Magnitude > 0.01
-
-	if moveMagnitude > 0 then
-		local targetVel = moveDir.Unit * CONFIG.Flight.Speed
-		self.CurrentVel = self.CurrentVel:Lerp(targetVel, clamp01(dt * CONFIG.Flight.VelocityLerpRate))
-	else
-		self.CurrentVel = self.CurrentVel:Lerp(Vector3.new(), clamp01(dt * CONFIG.Flight.IdleSlowdownRate))
-	end
-	self.BodyVel.Velocity = self.CurrentVel
-
-	local lookDir = camLook
-	if lookDir.Magnitude < 0.01 then lookDir = Vector3.new(0, 0, -1) end
-	lookDir = lookDir.Unit
-
-	local baseCF = CFrame.lookAt(self.Root.Position, self.Root.Position + lookDir)
-
-	local tiltDeg
-	if self.VerticalInput < 0 then
-		tiltDeg = CONFIG.Flight.TiltDownDeg
-	elseif self.VerticalInput > 0 then
-		tiltDeg = CONFIG.Flight.TiltNoneDeg
-	else
-		tiltDeg = (moveMagnitude > 0.1 and hasHorizontal) and CONFIG.Flight.TiltMovingDeg or CONFIG.Flight.TiltIdleDeg
-	end
-
-	local targetCF = baseCF * CFrame.Angles(-math.rad(tiltDeg), 0, 0)
-	self.CurrentGyroCF = (self.CurrentGyroCF or targetCF):Lerp(targetCF, clamp01(dt * CONFIG.Flight.RotationLerpRate))
-	self.BodyGyro.CFrame = self.CurrentGyroCF
-
-	if self.Humanoid and self.Humanoid.RigType ~= Enum.HumanoidRigType.R6 then
-		local now = os.clock()
-		local shouldFly = (moveMagnitude > CONFIG.Flight.AnimSwitch.ToFlyThreshold) and hasHorizontal
-		local shouldFloat = (moveMagnitude < CONFIG.Flight.AnimSwitch.ToFloatThreshold) or (not hasHorizontal)
-
-		if shouldFly and self.AnimMode ~= "Fly" and (now - self.LastAnimSwitch) >= CONFIG.Flight.AnimSwitch.Cooldown then
-			self.AnimMode = "Fly"
-			self.LastAnimSwitch = now
-			self:_playFly()
-		elseif shouldFloat and self.AnimMode ~= "Float" and (now - self.LastAnimSwitch) >= CONFIG.Flight.AnimSwitch.Cooldown then
-			self.AnimMode = "Float"
-			self.LastAnimSwitch = now
-			self:_playFloat()
-		end
-	end
-
-	if self.RightShoulder and self.DefaultShoulderC0 and self.Character then
-		local torso = self.Character:FindFirstChild("Torso") or self.Character:FindFirstChild("UpperTorso")
-		if torso then
-			local relDir = torso.CFrame:VectorToObjectSpace(camLook)
-			local yaw = math.atan2(-relDir.Z, relDir.X)
-			local pitch = math.asin(relDir.Y)
-
-			local armCF =
-				CFrame.new()
-				* CFrame.Angles(0, -math.pi / 2, 0)
-				* CFrame.Angles(-pitch * 0.9, 0, -yaw * 0.25)
-
-			self.RightShoulder.C0 = self.DefaultShoulderC0 * armCF
-		end
-	end
-end
-
---====================================================
--- Lighting Controller
---====================================================
-local LightingCtl = {}
-LightingCtl.__index = LightingCtl
-
-function LightingCtl.new()
-	return setmetatable({
-		Captured = false,
-		Original = { Props = {}, Sky = nil },
-		ActivePreset = "None",
-	}, LightingCtl)
-end
-
-function LightingCtl:_captureOnce()
-	if self.Captured then return end
-	self.Captured = true
-
-	self.Original.Props.Brightness = Lighting.Brightness
-	self.Original.Props.ClockTime = Lighting.ClockTime
-	self.Original.Props.Ambient = Lighting.Ambient
-	self.Original.Props.OutdoorAmbient = Lighting.OutdoorAmbient
-	self.Original.Props.EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale
-	self.Original.Props.EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale
-	self.Original.Props.ExposureCompensation = Lighting.ExposureCompensation
-
-	local sky = Lighting:FindFirstChildOfClass("Sky")
-	if sky then
-		self.Original.Sky = sky:Clone()
-	end
-end
-
-function LightingCtl:_getOrCreate(className, name)
-	local eff = Lighting:FindFirstChild(name)
-	if eff and eff.ClassName ~= className then
-		eff:Destroy()
-		eff = nil
-	end
-	if not eff then
-		eff = Instance.new(className)
-		eff.Name = name
-		eff.Parent = Lighting
-	end
-	return eff
-end
-
-function LightingCtl:_destroy(name)
-	local eff = Lighting:FindFirstChild(name)
-	if eff then eff:Destroy() end
-end
-
-function LightingCtl:IsEffectOn(name)
-	return Lighting:FindFirstChild(name) ~= nil
-end
-
-local SKYBOX = {
-	["Red Galaxy"] = { SkyboxBk=nil,SkyboxDn=nil,SkyboxFt=nil,SkyboxLf=nil,SkyboxRt=nil,SkyboxUp=nil },
-	["Deep Galaxy"] = { SkyboxBk=nil,SkyboxDn=nil,SkyboxFt=nil,SkyboxLf=nil,SkyboxRt=nil,SkyboxUp=nil },
-	["Anime Clouds"] = { SkyboxBk=nil,SkyboxDn=nil,SkyboxFt=nil,SkyboxLf=nil,SkyboxRt=nil,SkyboxUp=nil },
-	["Vibrant Clouds"] = { SkyboxBk=nil,SkyboxDn=nil,SkyboxFt=nil,SkyboxLf=nil,SkyboxRt=nil,SkyboxUp=nil },
-	["Blocky Sky"] = { SkyboxBk=nil,SkyboxDn=nil,SkyboxFt=nil,SkyboxLf=nil,SkyboxRt=nil,SkyboxUp=nil },
-}
-
-local PRESETS = {
-	["Red Galaxy"] = {
-		Lighting = {
-			Brightness = 2.2, ClockTime = 0.2,
-			Ambient = Color3.fromRGB(35, 10, 10),
-			OutdoorAmbient = Color3.fromRGB(55, 20, 20),
-			ExposureCompensation = 0.25,
-			EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1,
-		},
-		Effects = {
-			Bloom = { Intensity = 1.1, Size = 28, Threshold = 0.85 },
-			ColorCorrection = { Brightness = 0.04, Contrast = 0.18, Saturation = 0.35, TintColor = Color3.fromRGB(255, 110, 110) },
-			Atmosphere = { Density = 0.28, Offset = 0.2, Color = Color3.fromRGB(150, 70, 70), Decay = Color3.fromRGB(50, 15, 15), Glare = 0.28, Haze = 1.8 },
-			SunRays = { Intensity = 0.05, Spread = 0.7 },
-			DepthOfField = { FarIntensity = 0.25, FocusDistance = 22, InFocusRadius = 18, NearIntensity = 0.12 },
-			MotionBlur = { Intensity = 0.22 },
-		},
-	},
-	["Deep Galaxy"] = {
-		Lighting = {
-			Brightness = 2.0, ClockTime = 23.6,
-			Ambient = Color3.fromRGB(10, 10, 28),
-			OutdoorAmbient = Color3.fromRGB(20, 20, 55),
-			ExposureCompensation = 0.15,
-			EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1,
-		},
-		Effects = {
-			Bloom = { Intensity = 0.85, Size = 24, Threshold = 0.9 },
-			ColorCorrection = { Brightness = 0.02, Contrast = 0.12, Saturation = 0.18, TintColor = Color3.fromRGB(200, 220, 255) },
-			Atmosphere = { Density = 0.18, Offset = 0.1, Color = Color3.fromRGB(90, 110, 160), Decay = Color3.fromRGB(20, 25, 40), Glare = 0.18, Haze = 1.2 },
-			SunRays = { Intensity = 0.03, Spread = 0.55 },
-			DepthOfField = { FarIntensity = 0.22, FocusDistance = 28, InFocusRadius = 22, NearIntensity = 0.10 },
-			MotionBlur = { Intensity = 0.14 },
-		},
-	},
-	["Anime Clouds"] = {
-		Lighting = {
-			Brightness = 2.8, ClockTime = 14.0,
-			Ambient = Color3.fromRGB(120, 130, 160),
-			OutdoorAmbient = Color3.fromRGB(150, 170, 200),
-			ExposureCompensation = 0.35,
-			EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1,
-		},
-		Effects = {
-			Bloom = { Intensity = 0.6, Size = 18, Threshold = 0.92 },
-			ColorCorrection = { Brightness = 0.06, Contrast = 0.08, Saturation = 0.25, TintColor = Color3.fromRGB(255, 245, 255) },
-			Atmosphere = { Density = 0.35, Offset = 0.05, Color = Color3.fromRGB(205, 220, 255), Decay = Color3.fromRGB(130, 160, 200), Glare = 0.08, Haze = 1.9 },
-			SunRays = { Intensity = 0.08, Spread = 0.85 },
-			DepthOfField = { FarIntensity = 0.12, FocusDistance = 45, InFocusRadius = 45, NearIntensity = 0.05 },
-			MotionBlur = { Intensity = 0.08 },
-		},
-	},
-	["Vibrant Clouds"] = {
-		Lighting = {
-			Brightness = 3.1, ClockTime = 16.2,
-			Ambient = Color3.fromRGB(150, 160, 170),
-			OutdoorAmbient = Color3.fromRGB(180, 190, 205),
-			ExposureCompensation = 0.45,
-			EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1,
-		},
-		Effects = {
-			Bloom = { Intensity = 0.75, Size = 20, Threshold = 0.9 },
-			ColorCorrection = { Brightness = 0.05, Contrast = 0.10, Saturation = 0.30, TintColor = Color3.fromRGB(255, 255, 255) },
-			Atmosphere = { Density = 0.22, Offset = 0.0, Color = Color3.fromRGB(220, 230, 255), Decay = Color3.fromRGB(160, 190, 210), Glare = 0.10, Haze = 1.4 },
-			SunRays = { Intensity = 0.10, Spread = 1.0 },
-			DepthOfField = { FarIntensity = 0.10, FocusDistance = 60, InFocusRadius = 70, NearIntensity = 0.04 },
-			MotionBlur = { Intensity = 0.06 },
-		},
-	},
-	["Blocky Sky"] = {
-		Lighting = {
-			Brightness = 2.4, ClockTime = 12.0,
-			Ambient = Color3.fromRGB(105, 105, 105),
-			OutdoorAmbient = Color3.fromRGB(135, 135, 135),
-			ExposureCompensation = 0.10,
-			EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1,
-		},
-		Effects = {
-			Bloom = { Intensity = 0.35, Size = 14, Threshold = 0.95 },
-			ColorCorrection = { Brightness = 0.01, Contrast = 0.06, Saturation = 0.12, TintColor = Color3.fromRGB(245, 245, 245) },
-			Atmosphere = { Density = 0.08, Offset = 0.0, Color = Color3.fromRGB(220, 220, 220), Decay = Color3.fromRGB(160, 160, 160), Glare = 0.04, Haze = 0.8 },
-			SunRays = { Intensity = 0.02, Spread = 0.35 },
-			DepthOfField = { FarIntensity = 0.06, FocusDistance = 90, InFocusRadius = 90, NearIntensity = 0.02 },
-			MotionBlur = { Intensity = 0.04 },
-		},
-	},
-}
-
-function LightingCtl:_applyLightingProps(presetName)
-	local preset = PRESETS[presetName]
-	if not preset then return end
-	local p = preset.Lighting
-	Lighting.Brightness = p.Brightness
-	Lighting.ClockTime = p.ClockTime
-	Lighting.Ambient = p.Ambient
-	Lighting.OutdoorAmbient = p.OutdoorAmbient
-	Lighting.ExposureCompensation = p.ExposureCompensation
-	Lighting.EnvironmentDiffuseScale = p.EnvironmentDiffuseScale
-	Lighting.EnvironmentSpecularScale = p.EnvironmentSpecularScale
-end
-
-function LightingCtl:_applySkybox(presetName)
-	local data = SKYBOX[presetName]
-	if not data then return end
-
-	local existing = Lighting:FindFirstChild("SOS_Sky")
-	if existing and existing:IsA("Sky") then
-		existing:Destroy()
-	end
-
-	local sky = Instance.new("Sky")
-	sky.Name = "SOS_Sky"
-	for k, v in pairs(data) do
-		if v and typeof(v) == "string" then
-			pcall(function() sky[k] = v end)
-		end
-	end
-	sky.Parent = Lighting
-end
-
-function LightingCtl:_applyPresetEffectSettingsToExisting(presetName)
-	local preset = PRESETS[presetName]
-	if not preset then return end
-	local e = preset.Effects
-
-	local bloom = Lighting:FindFirstChild("SOS_Bloom")
-	if bloom and bloom:IsA("BloomEffect") then
-		bloom.Intensity = e.Bloom.Intensity
-		bloom.Size = e.Bloom.Size
-		bloom.Threshold = e.Bloom.Threshold
-	end
-
-	local cc = Lighting:FindFirstChild("SOS_ColorCorrection")
-	if cc and cc:IsA("ColorCorrectionEffect") then
-		cc.Brightness = e.ColorCorrection.Brightness
-		cc.Contrast = e.ColorCorrection.Contrast
-		cc.Saturation = e.ColorCorrection.Saturation
-		cc.TintColor = e.ColorCorrection.TintColor
-	end
-
-	local at = Lighting:FindFirstChild("SOS_Atmosphere")
-	if at and at:IsA("Atmosphere") then
-		at.Density = e.Atmosphere.Density
-		at.Offset = e.Atmosphere.Offset
-		at.Color = e.Atmosphere.Color
-		at.Decay = e.Atmosphere.Decay
-		at.Glare = e.Atmosphere.Glare
-		at.Haze = e.Atmosphere.Haze
-	end
-
-	local sr = Lighting:FindFirstChild("SOS_SunRays")
-	if sr and sr:IsA("SunRaysEffect") then
-		sr.Intensity = e.SunRays.Intensity
-		sr.Spread = e.SunRays.Spread
-	end
-
-	local dof = Lighting:FindFirstChild("SOS_DepthOfField")
-	if dof and dof:IsA("DepthOfFieldEffect") then
-		dof.FarIntensity = e.DepthOfField.FarIntensity
-		dof.FocusDistance = e.DepthOfField.FocusDistance
-		dof.InFocusRadius = e.DepthOfField.InFocusRadius
-		dof.NearIntensity = e.DepthOfField.NearIntensity
-	end
-
-	local mb = Lighting:FindFirstChild("SOS_MotionBlur")
-	if mb and mb:IsA("BlurEffect") then
-		mb.Size = math.floor(24 * e.MotionBlur.Intensity + 0.5)
-	end
-end
-
-function LightingCtl:SetPreset(name)
-	if not PRESETS[name] then return false end
-	self:_captureOnce()
-
-	self.ActivePreset = name
-	self:_applyLightingProps(name)
-	self:_applySkybox(name)
-	self:_applyPresetEffectSettingsToExisting(name)
-	return true
-end
-
-function LightingCtl:ToggleEffect(effectKey, on)
-	self:_captureOnce()
-	local preset = PRESETS[self.ActivePreset] or PRESETS["Deep Galaxy"]
-	local e = preset.Effects
-
-	if effectKey == "Bloom" then
-		if on then
-			local bloom = self:_getOrCreate("BloomEffect", "SOS_Bloom")
-			bloom.Intensity, bloom.Size, bloom.Threshold = e.Bloom.Intensity, e.Bloom.Size, e.Bloom.Threshold
+			floatTrack = tr
+			floatTrack.Priority = Enum.AnimationPriority.Action
+			floatTrack.Looped = true
 		else
-			self:_destroy("SOS_Bloom")
+			floatTrack = nil
+			dprint("Float track failed to load:", FLOAT_ID)
 		end
-	elseif effectKey == "ColorCorrection" then
-		if on then
-			local cc = self:_getOrCreate("ColorCorrectionEffect", "SOS_ColorCorrection")
-			cc.Brightness = e.ColorCorrection.Brightness
-			cc.Contrast = e.ColorCorrection.Contrast
-			cc.Saturation = e.ColorCorrection.Saturation
-			cc.TintColor = e.ColorCorrection.TintColor
+	end
+
+	do
+		local a = Instance.new("Animation")
+		a.AnimationId = FLY_ID
+		local ok, tr = pcall(function() return animator:LoadAnimation(a) end)
+		if ok and tr then
+			flyTrack = tr
+			flyTrack.Priority = Enum.AnimationPriority.Action
+			flyTrack.Looped = true
 		else
-			self:_destroy("SOS_ColorCorrection")
+			flyTrack = nil
+			dprint("Fly track failed to load:", FLY_ID)
 		end
-	elseif effectKey == "Atmosphere" then
-		if on then
-			local at = self:_getOrCreate("Atmosphere", "SOS_Atmosphere")
-			at.Density = e.Atmosphere.Density
-			at.Offset = e.Atmosphere.Offset
-			at.Color = e.Atmosphere.Color
-			at.Decay = e.Atmosphere.Decay
-			at.Glare = e.Atmosphere.Glare
-			at.Haze = e.Atmosphere.Haze
-		else
-			self:_destroy("SOS_Atmosphere")
-		end
-	elseif effectKey == "SunRays" then
-		if on then
-			local sr = self:_getOrCreate("SunRaysEffect", "SOS_SunRays")
-			sr.Intensity = e.SunRays.Intensity
-			sr.Spread = e.SunRays.Spread
-		else
-			self:_destroy("SOS_SunRays")
-		end
-	elseif effectKey == "DepthOfField" then
-		if on then
-			local dof = self:_getOrCreate("DepthOfFieldEffect", "SOS_DepthOfField")
-			dof.FarIntensity = e.DepthOfField.FarIntensity
-			dof.FocusDistance = e.DepthOfField.FocusDistance
-			dof.InFocusRadius = e.DepthOfField.InFocusRadius
-			dof.NearIntensity = e.DepthOfField.NearIntensity
-		else
-			self:_destroy("SOS_DepthOfField")
-		end
-	elseif effectKey == "MotionBlur" then
-		if on then
-			local mb = self:_getOrCreate("BlurEffect", "SOS_MotionBlur")
-			mb.Size = math.floor(24 * e.MotionBlur.Intensity + 0.5)
-		else
-			self:_destroy("SOS_MotionBlur")
-		end
+	end
+
+	animMode = "Float"
+	lastAnimSwitch = 0
+end
+
+local function playFloat()
+	if humanoid and humanoid.RigType == Enum.HumanoidRigType.R6 then return end
+	if not floatTrack then return end
+
+	if flyTrack and flyTrack.IsPlaying then
+		pcall(function() flyTrack:Stop(0.25) end)
+	end
+	if not floatTrack.IsPlaying then
+		pcall(function() floatTrack:Play(0.25) end)
 	end
 end
 
-function LightingCtl:Reset()
-	if not self.Captured then return end
+local function playFly()
+	if humanoid and humanoid.RigType == Enum.HumanoidRigType.R6 then return end
+	if not flyTrack then return end
 
-	self:_destroy("SOS_Bloom")
-	self:_destroy("SOS_ColorCorrection")
-	self:_destroy("SOS_Atmosphere")
-	self:_destroy("SOS_SunRays")
-	self:_destroy("SOS_DepthOfField")
-	self:_destroy("SOS_MotionBlur")
-
-	local existingSky = Lighting:FindFirstChild("SOS_Sky")
-	if existingSky then existingSky:Destroy() end
-
-	local p = self.Original.Props
-	Lighting.Brightness = p.Brightness
-	Lighting.ClockTime = p.ClockTime
-	Lighting.Ambient = p.Ambient
-	Lighting.OutdoorAmbient = p.OutdoorAmbient
-	Lighting.EnvironmentDiffuseScale = p.EnvironmentDiffuseScale
-	Lighting.EnvironmentSpecularScale = p.EnvironmentSpecularScale
-	Lighting.ExposureCompensation = p.ExposureCompensation
-
-	self.ActivePreset = "None"
+	if floatTrack and floatTrack.IsPlaying then
+		pcall(function() floatTrack:Stop(0.25) end)
+	end
+	if not flyTrack.IsPlaying then
+		pcall(function() flyTrack:Play(0.25) end)
+	end
 end
 
---====================================================
--- VIP Coil
---====================================================
-local function userHasVip()
-	for passId in pairs(CONFIG.MicUp.VipGamepasses) do
-		local ok, owns = pcall(function()
-			return MarketplaceService:UserOwnsGamePassAsync(LocalPlayer.UserId, passId)
-		end)
-		if ok and owns then
-			return true
-		end
-	end
-	return false
+local function stopFlightAnims()
+	if floatTrack then pcall(function() floatTrack:Stop(0.25) end) end
+	if flyTrack then pcall(function() flyTrack:Stop(0.25) end) end
 end
 
-local function giveBetterSpeedCoil()
-	local char = LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not char or not hum then return end
+--------------------------------------------------------------------
+-- CHARACTER SETUP
+--------------------------------------------------------------------
+local function getCharacter()
+	character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	camera = workspace.CurrentCamera
 
-	if not userHasVip() then
-		notify("VIP", "You need VIP first.", 3)
-		return
+	rightShoulder = findRightShoulderMotor(character)
+	defaultShoulderC0 = rightShoulder and rightShoulder.C0 or nil
+
+	originalRunSoundStates = {}
+
+	if DEFAULT_WALKSPEED == nil then
+		DEFAULT_WALKSPEED = humanoid.WalkSpeed
+	end
+	if playerSpeed == nil then
+		playerSpeed = humanoid.WalkSpeed
 	end
 
-	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
-	if backpack and backpack:FindFirstChild(CONFIG.MicUp.Coil.Name) then
-		notify("VIP", "You already have the Better Speed Coil.", 2)
-		return
+	if DEFAULT_FOV == nil and camera then
+		DEFAULT_FOV = camera.FieldOfView
+	end
+	if DEFAULT_CAM_MIN_ZOOM == nil then
+		DEFAULT_CAM_MIN_ZOOM = LocalPlayer.CameraMinZoomDistance
+	end
+	if DEFAULT_CAM_MAX_ZOOM == nil then
+		DEFAULT_CAM_MAX_ZOOM = LocalPlayer.CameraMaxZoomDistance
+	end
+	if camFov == nil and DEFAULT_FOV then
+		camFov = DEFAULT_FOV
+	end
+	if camMaxZoom == nil then
+		camMaxZoom = INFINITE_ZOOM
 	end
 
-	local tool = Instance.new("Tool")
-	tool.Name = CONFIG.MicUp.Coil.Name
-	tool.RequiresHandle = false
-	tool.CanBeDropped = false
-
-	local oldSpeed
-	tool.Equipped:Connect(function()
-		if hum and hum.Parent then
-			oldSpeed = hum.WalkSpeed
-			hum.WalkSpeed = CONFIG.MicUp.Coil.WalkSpeed
-		end
-	end)
-
-	tool.Unequipped:Connect(function()
-		if hum and hum.Parent then
-			if oldSpeed then hum.WalkSpeed = oldSpeed end
-			oldSpeed = nil
-		end
-	end)
-
-	tool.Parent = backpack or LocalPlayer:WaitForChild("Backpack")
-	notify("VIP", "Better Speed Coil added.", 2)
+	loadFlightTracks()
 end
 
---====================================================
--- Intro
---====================================================
-local function playIntro(gui)
-	if not CONFIG.Intro.Enabled then return end
-	if not gui then return end
+--------------------------------------------------------------------
+-- ANIMATE OVERRIDES (Anim Packs)
+--------------------------------------------------------------------
+local function getAnimateScript()
+	if not character then return nil end
+	return character:FindFirstChild("Animate")
+end
 
-	local rng = Random.new()
+local function applyStateOverrideToAnimate(stateName, packEntry)
+	local animate = getAnimateScript()
+	if not animate then
+		notify("Anim Packs", "No Animate script found in character.", 3)
+		return false
+	end
 
-	local overlay = Instance.new("Frame")
-	overlay.Name = "SOS_Intro"
-	overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	overlay.BackgroundTransparency = 0.25
-	overlay.BorderSizePixel = 0
-	overlay.Size = UDim2.new(1, 0, 1, 0)
-	overlay.ZIndex = 999
-	overlay.Parent = gui
+	local hum = humanoid
+	if not hum then return false end
 
-	local flash = Instance.new("Frame")
-	flash.BackgroundColor3 = Color3.fromRGB(220, 0, 0)
-	flash.BackgroundTransparency = 1
-	flash.BorderSizePixel = 0
-	flash.Size = UDim2.new(1, 0, 1, 0)
-	flash.ZIndex = 1000
-	flash.Parent = overlay
+	animate.Disabled = true
+	stopAllPlayingTracks(hum)
 
-	local card = Instance.new("Frame")
-	card.AnchorPoint = Vector2.new(0.5, 0.5)
-	card.Position = UDim2.new(0.5, 0, 0.46, 0)
-	card.Size = UDim2.new(0, 440, 0, 280)
-	card.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-	card.BackgroundTransparency = 0.10
-	card.BorderSizePixel = 0
-	card.ZIndex = 1001
-	card.Parent = overlay
-	UI.Corner(card, 18)
+	local function setAnimValue(folderName, childName, assetIdStr)
+		local f = animate:FindFirstChild(folderName)
+		if not f then return end
+		local a = f:FindFirstChild(childName)
+		if a and a:IsA("Animation") then
+			a.AnimationId = assetIdStr
+		end
+	end
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 40, 40)
-	stroke.Thickness = 2
-	stroke.Transparency = 0.08
-	stroke.Parent = card
+	local function setDirect(childName, assetIdStr)
+		local a = animate:FindFirstChild(childName)
+		if a and a:IsA("Animation") then
+			a.AnimationId = assetIdStr
+		end
+	end
 
-	local rune = Instance.new("ImageLabel")
-	rune.BackgroundTransparency = 1
-	rune.AnchorPoint = Vector2.new(0.5, 0.5)
-	rune.Position = UDim2.new(0.5, 0, 0.44, 0)
-	rune.Size = UDim2.new(0, 250, 0, 250)
-	rune.Image = "rbxassetid://6235763214"
-	rune.ImageTransparency = 0.55
-	rune.ZIndex = 1002
-	rune.Parent = card
+	local assetIdStr = toAssetIdString(packEntry)
+	if not assetIdStr then
+		animate.Disabled = false
+		return false
+	end
 
-	local glow = Instance.new("ImageLabel")
-	glow.BackgroundTransparency = 1
-	glow.AnchorPoint = Vector2.new(0.5, 0.5)
-	glow.Position = rune.Position
-	glow.Size = UDim2.new(0, 300, 0, 300)
-	glow.Image = "rbxassetid://5028857084"
-	glow.ImageTransparency = 0.62
-	glow.ZIndex = 1002
-	glow.Parent = card
+	if stateName == "Idle" then
+		setAnimValue("idle", "Animation1", assetIdStr)
+		setAnimValue("idle", "Animation2", assetIdStr)
+	elseif stateName == "Walk" then
+		setAnimValue("walk", "WalkAnim", assetIdStr)
+	elseif stateName == "Run" then
+		setAnimValue("run", "RunAnim", assetIdStr)
+	elseif stateName == "Jump" then
+		setAnimValue("jump", "JumpAnim", assetIdStr)
+	elseif stateName == "Climb" then
+		setAnimValue("climb", "ClimbAnim", assetIdStr)
+	elseif stateName == "Fall" then
+		setAnimValue("fall", "FallAnim", assetIdStr)
+	elseif stateName == "Swim" then
+		setAnimValue("swim", "Swim", assetIdStr)
+		setAnimValue("swim", "SwimIdle", assetIdStr)
+		setDirect("swim", assetIdStr)
+	end
 
-	local icon = Instance.new("ImageLabel")
-	icon.BackgroundTransparency = 1
-	icon.AnchorPoint = Vector2.new(0.5, 0.5)
-	icon.Position = UDim2.new(0.5, 0, 0.44, 0)
-	icon.Size = UDim2.new(0, 160, 0, 160)
-	icon.Image = CONFIG.Intro.IconImage
-	icon.ScaleType = Enum.ScaleType.Fit
-	icon.ZIndex = 1003
-	icon.Parent = card
-
-	local iconRed = Instance.new("ImageLabel")
-	iconRed.BackgroundTransparency = 1
-	iconRed.AnchorPoint = Vector2.new(0.5, 0.5)
-	iconRed.Position = icon.Position
-	iconRed.Size = icon.Size
-	iconRed.Image = CONFIG.Intro.IconImage
-	iconRed.ImageColor3 = Color3.fromRGB(255, 40, 40)
-	iconRed.ImageTransparency = 0.65
-	iconRed.ScaleType = Enum.ScaleType.Fit
-	iconRed.ZIndex = 1002
-	iconRed.Parent = card
-
-	local iconDark = Instance.new("ImageLabel")
-	iconDark.BackgroundTransparency = 1
-	iconDark.AnchorPoint = Vector2.new(0.5, 0.5)
-	iconDark.Position = icon.Position
-	iconDark.Size = icon.Size
-	iconDark.Image = CONFIG.Intro.IconImage
-	iconDark.ImageColor3 = Color3.fromRGB(0, 0, 0)
-	iconDark.ImageTransparency = 0.75
-	iconDark.ScaleType = Enum.ScaleType.Fit
-	iconDark.ZIndex = 1002
-	iconDark.Parent = card
-
-	local title = Instance.new("TextLabel")
-	title.BackgroundTransparency = 1
-	title.AnchorPoint = Vector2.new(0.5, 0)
-	title.Position = UDim2.new(0.5, 0, 0.72, 0)
-	title.Size = UDim2.new(1, -40, 0, 40)
-	title.Font = Enum.Font.GothamBlack
-	title.TextSize = 36
-	title.Text = CONFIG.Intro.Title
-	title.TextColor3 = Color3.fromRGB(255, 245, 245)
-	title.TextStrokeColor3 = Color3.fromRGB(255, 0, 0)
-	title.TextStrokeTransparency = 0.45
-	title.ZIndex = 1003
-	title.Parent = card
-	title.TextXAlignment = Enum.TextXAlignment.Center
-
-	local sub = Instance.new("TextLabel")
-	sub.BackgroundTransparency = 1
-	sub.AnchorPoint = Vector2.new(0.5, 0)
-	sub.Position = UDim2.new(0.5, 0, 0.87, 0)
-	sub.Size = UDim2.new(1, -40, 0, 26)
-	sub.Font = Enum.Font.GothamBold
-	sub.TextSize = 14
-	sub.Text = CONFIG.Intro.Subtitle
-	sub.TextColor3 = Color3.fromRGB(220, 220, 220)
-	sub.ZIndex = 1003
-	sub.Parent = card
-	sub.TextXAlignment = Enum.TextXAlignment.Center
-
-	local scale = Instance.new("UIScale")
-	scale.Scale = 0.82
-	scale.Parent = card
-
-	local snd = Instance.new("Sound")
-	snd.SoundId = CONFIG.Intro.StartSound
-	snd.Volume = 0.9
-	snd.Looped = false
-	snd.Parent = overlay
-
+	animate.Disabled = false
 	pcall(function()
-		ContentProvider:PreloadAsync({icon, iconRed, iconDark, rune, glow, snd})
+		hum:ChangeState(Enum.HumanoidStateType.Running)
 	end)
 
-	pcall(function() snd:Play() end)
-
-	icon.ImageTransparency = 1
-	title.TextTransparency = 1
-	sub.TextTransparency = 1
-	rune.ImageTransparency = 1
-	glow.ImageTransparency = 1
-
-	TweenService:Create(scale, TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-	TweenService:Create(icon, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { ImageTransparency = 0 }):Play()
-	TweenService:Create(title, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
-	TweenService:Create(sub, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
-	TweenService:Create(rune, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { ImageTransparency = 0.55 }):Play()
-	TweenService:Create(glow, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { ImageTransparency = 0.62 }):Play()
-
-	task.spawn(function()
-		for _ = 1, 2 do
-			if not overlay.Parent then return end
-			flash.BackgroundTransparency = 0.35
-			task.wait(0.05)
-			flash.BackgroundTransparency = 1
-			task.wait(0.07)
-		end
-	end)
-
-	local basePos = card.Position
-	local baseIconPos = icon.Position
-	local baseRuneRot = rune.Rotation
-	local t0 = os.clock()
-
-	local glitchConn
-	glitchConn = RunService.RenderStepped:Connect(function(dt)
-		if not overlay.Parent then
-			pcall(function() glitchConn:Disconnect() end)
-			return
-		end
-
-		local t = os.clock() - t0
-		local intensity = 1 - clamp01(t / (CONFIG.Intro.ShowSeconds + 0.25))
-		local shake = 10 * intensity
-
-		if rng:NextNumber() < (0.25 + 0.35 * intensity) then
-			local ox = rng:NextNumber(-shake, shake)
-			local oy = rng:NextNumber(-shake, shake)
-			card.Position = UDim2.new(basePos.X.Scale, basePos.X.Offset + ox, basePos.Y.Scale, basePos.Y.Offset + oy)
-		else
-			card.Position = card.Position:Lerp(basePos, clamp01(dt * 12))
-		end
-
-		rune.Rotation = baseRuneRot + (t * (60 + 120 * intensity)) + (rng:NextNumber(-6, 6) * intensity)
-
-		local kick = (rng:NextNumber() < (0.20 + 0.35 * intensity))
-		if kick then
-			local ix = rng:NextNumber(-8, 8) * intensity
-			local iy = rng:NextNumber(-6, 6) * intensity
-			iconRed.Position = UDim2.new(baseIconPos.X.Scale, baseIconPos.X.Offset + ix, baseIconPos.Y.Scale, baseIconPos.Y.Offset + iy)
-			iconDark.Position = UDim2.new(baseIconPos.X.Scale, baseIconPos.X.Offset - ix, baseIconPos.Y.Scale, baseIconPos.Y.Offset - iy)
-			iconRed.ImageTransparency = 0.45 + 0.25 * (1 - intensity)
-			iconDark.ImageTransparency = 0.55 + 0.25 * (1 - intensity)
-		else
-			iconRed.Position = iconRed.Position:Lerp(baseIconPos, clamp01(dt * 20))
-			iconDark.Position = iconDark.Position:Lerp(baseIconPos, clamp01(dt * 20))
-		end
-
-		if rng:NextNumber() < (0.12 + 0.18 * intensity) then
-			title.Position = UDim2.new(0.5, rng:NextInteger(-6, 6), 0.72, rng:NextInteger(-3, 3))
-		else
-			title.Position = title.Position:Lerp(UDim2.new(0.5, 0, 0.72, 0), clamp01(dt * 12))
-		end
-	end)
-
-	task.delay(CONFIG.Intro.ShowSeconds, function()
-		if glitchConn then pcall(function() glitchConn:Disconnect() end) end
-		if not overlay.Parent then return end
-
-		local fade = TweenInfo.new(CONFIG.Intro.FadeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
-		TweenService:Create(overlay, fade, { BackgroundTransparency = 1 }):Play()
-		TweenService:Create(card, fade, { BackgroundTransparency = 1 }):Play()
-		TweenService:Create(stroke, fade, { Transparency = 1 }):Play()
-		TweenService:Create(rune, fade, { ImageTransparency = 1 }):Play()
-		TweenService:Create(glow, fade, { ImageTransparency = 1 }):Play()
-		TweenService:Create(icon, fade, { ImageTransparency = 1 }):Play()
-		TweenService:Create(iconRed, fade, { ImageTransparency = 1 }):Play()
-		TweenService:Create(iconDark, fade, { ImageTransparency = 1 }):Play()
-		TweenService:Create(title, fade, { TextTransparency = 1 }):Play()
-		TweenService:Create(sub, fade, { TextTransparency = 1 }):Play()
-
-		task.delay(CONFIG.Intro.FadeSeconds + 0.05, function()
-			safeDestroy(overlay)
-		end)
-	end)
+	return true
 end
 
---====================================================
--- Anim Packs (data + apply)
---====================================================
+local function reapplyAllOverridesAfterRespawn()
+	for stateName, asset in pairs(stateOverrides) do
+		if asset then
+			applyStateOverrideToAnimate(stateName, asset)
+		end
+	end
+end
+
+--------------------------------------------------------------------
+-- ANIMATION PACK LIST (Roblox Anims / Unreleased)
+--------------------------------------------------------------------
 local AnimationPacks = {
 	Vampire = { Idle1=1083445855, Idle2=1083450166, Walk=1083473930, Run=1083462077, Jump=1083455352, Climb=1083439238, Fall=1083443587 },
 	Hero = { Idle1=616111295, Idle2=616113536, Walk=616122287, Run=616117076, Jump=616115533, Climb=616104706, Fall=616108001 },
@@ -1394,7 +759,17 @@ local AnimationPacks = {
 	ZombieFE = { Idle1=3489171152, Idle2=3489171152, Walk=3489174223, Run=3489173414, Jump=616161997, Climb=616156119, Fall=616157476 },
 }
 
-local UnreleasedNames = { "Cowboy","Princess","ZombieFE","Confident","Ghost","Patrol","Popstar","Sneaky" }
+local UnreleasedNames = {
+	"Cowboy",
+	"Princess",
+	"ZombieFE",
+	"Confident",
+	"Ghost",
+	"Patrol",
+	"Popstar",
+	"Sneaky",
+}
+
 local function isInUnreleased(name)
 	for _, n in ipairs(UnreleasedNames) do
 		if n == name then return true end
@@ -1402,20 +777,126 @@ local function isInUnreleased(name)
 	return false
 end
 
-local function listPackNames(category)
+--------------------------------------------------------------------
+-- CUSTOM ANIMS (Custom tab)
+--------------------------------------------------------------------
+local CustomIdle = {
+	["Tall"] = 91348372558295,
+
+	["Jonathan"] = 120629563851640,
+	["Killer Queen"] = 104714163485875,
+	["Dio"] = 138467089338692,
+	["Dio OH"] = 96658788627102,
+	["Joseph"] = 87470625500564,
+	["Jolyne"] = 97892708412696,
+	["Diego"] = 127117233320016,
+	["Polnareff"] = 104647713661701,
+	["Jotaro"] = 134878791451155,
+	["Funny V"] = 88859285630202,
+	["Johnny"] = 77834689346843,
+	["Made in Heaven"] = 79234770032233,
+	["Mahito"] = 92585001378279,
+	["Honored One"] = 139000839803032,
+	["Gon Rage"] = 136678571910037,
+	["Sol's RNG 1"] = 125722696765151,
+	["Luffy"] = 107520488394848,
+	["Sans"] = 123627677663418,
+	["Fake R6"] = 96518514398708,
+	["Goku Warm Up"] = 84773442399798,
+	["Goku UI/Mui"] = 130104867308995,
+	["Goku Black"] = 110240143520283,
+	["Sukuna"] = 82974857632552,
+	["Toji"] = 113657065279101,
+	["Isagi"] = 135818607077529,
+	["Yuji"] = 103088653217891,
+	["Lavinho"] = 92045987196732,
+	["Ippo"] = 76110924880592,
+	["Aizen"] = 83896268225208,
+	["Kaneki"] = 116671111363578,
+	["Tanjiro"] = 118533315464114,
+	["Head Hold"] = 129453036635884,
+	["Robot Perform"] = 105174189783870,
+
+	["Springtrap"] = 90257184304714,
+	["Hmmm Float"] = 107666091494733,
+	["OG Golden Freddy"] = 138402679058341,
+	["Wally West"] = 106169111259587,
+	["𝓛"] = 103267638009024,
+	["Robot Malfunction"] = 110419039625879,
+}
+
+local CustomRun = {
+	["Tall"] = 134010853417610,
+	["Officer Earl"] = 104646820775114,
+	["AOT Titan"] = 95363958550738,
+	["Captain JS"] = 87806542116815,
+	["Ninja Sprint"] = 123763532572423,
+	["IDEK"] = 101293881003047,
+	["Honored One"] = 82260970223217,
+	["Head Hold"] = 92715775326925,
+
+	["Robot Speed 3"] = 128047975332475,
+
+	["Springtrap Sturdy"] = 80927378599036,
+	["UFO"] = 118703314621593,
+	["Closed Eyes Vibe"] = 117991470645633,
+	["Wally West"] = 102622695004986,
+	["Squidward"] = 82365330773489,
+	["On A Mission"] = 113718116290824,
+	["Very Happy Run"] = 86522070222739,
+	["Missile"] = 92401041987431,
+	["I Wanna Run Away"] = 78510387198062,
+}
+
+local CustomWalk = {
+	["Football/Soccer"] = 116881956670910,
+	["Animal"] = 87721497492370,
+	["Fredbear"] = 133284420439423,
+	["Cute Anime"] = 106767496454996,
+}
+
+local function listCustomNamesForState(stateName)
+	local t = {}
+	local src = nil
+	if stateName == "Idle" then src = CustomIdle end
+	if stateName == "Run" then src = CustomRun end
+	if stateName == "Walk" then src = CustomWalk end
+	if not src then return t end
+	for name, _ in pairs(src) do
+		table.insert(t, name)
+	end
+	table.sort(t)
+	return t
+end
+
+local function getCustomIdForState(name, stateName)
+	if stateName == "Idle" then return CustomIdle[name] end
+	if stateName == "Run" then return CustomRun[name] end
+	if stateName == "Walk" then return CustomWalk[name] end
+	return nil
+end
+
+--------------------------------------------------------------------
+-- ROBLOX/UNRELEASED LIST HELPERS
+--------------------------------------------------------------------
+local function listPackNamesForCategory(category)
 	local names = {}
-	for name in pairs(AnimationPacks) do
+	for name, _ in pairs(AnimationPacks) do
 		if category == "Unreleased" then
-			if isInUnreleased(name) then table.insert(names, name) end
-		else
-			if not isInUnreleased(name) then table.insert(names, name) end
+			if isInUnreleased(name) then
+				table.insert(names, name)
+			end
+		elseif category == "Roblox Anims" then
+			if not isInUnreleased(name) then
+				table.insert(names, name)
+			end
 		end
 	end
 	table.sort(names)
 	return names
 end
 
-local function getPackIdForState(packName, stateName)
+local function getPackValueForState(packName, stateName)
 	local pack = AnimationPacks[packName]
 	if not pack then return nil end
 	if stateName == "Idle" then
@@ -1430,463 +911,730 @@ local function getPackIdForState(packName, stateName)
 		return pack.Climb
 	elseif stateName == "Fall" then
 		return pack.Fall
+	elseif stateName == "Swim" then
+		return nil
 	end
 	return nil
 end
 
-local StateOverrides = { Idle=nil, Walk=nil, Run=nil, Jump=nil, Climb=nil, Fall=nil, Swim=nil }
+--------------------------------------------------------------------
+-- MOVEMENT INPUT
+--------------------------------------------------------------------
+local function updateMovementInput()
+	local dir = Vector3.new(0, 0, 0)
 
-local function stopAllTracks(hum)
-	for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
-		pcall(function() tr:Stop(0) end)
-	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + Vector3.new(0, 0, -1) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir + Vector3.new(0, 0, 1) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir + Vector3.new(-1, 0, 0) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + Vector3.new(1, 0, 0) end
+
+	moveInput = dir
+
+	local vert = 0
+	if UserInputService:IsKeyDown(Enum.KeyCode.E) then vert = vert + 1 end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Q) then vert = vert - 1 end
+	verticalInput = vert
 end
 
-local function applyStateOverride(character, humanoid, stateName, assetId)
-	local animate = character and character:FindFirstChild("Animate")
-	if not animate or not humanoid then
-		return false, "Animate script missing."
+--------------------------------------------------------------------
+-- FLIGHT CORE
+--------------------------------------------------------------------
+local function startFlying()
+	if flying or not humanoid or not rootPart then return end
+	flying = true
+
+	humanoid.PlatformStand = true
+	cacheAndMuteRunSounds()
+
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+	bodyGyro.P = 1e5
+	bodyGyro.D = 1000
+	bodyGyro.CFrame = rootPart.CFrame
+	bodyGyro.Parent = rootPart
+
+	bodyVel = Instance.new("BodyVelocity")
+	bodyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+	bodyVel.Velocity = Vector3.new()
+	bodyVel.P = 1250
+	bodyVel.Parent = rootPart
+
+	currentVelocity = Vector3.new(0, 0, 0)
+	currentGyroCFrame = rootPart.CFrame
+
+	local camLook = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1)
+	if camLook.Magnitude < 0.01 then camLook = Vector3.new(0, 0, -1) end
+	camLook = camLook.Unit
+
+	local baseCF = CFrame.lookAt(rootPart.Position, rootPart.Position + camLook)
+	currentGyroCFrame = baseCF * CFrame.Angles(-math.rad(IDLE_TILT_DEG), 0, 0)
+	bodyGyro.CFrame = currentGyroCFrame
+
+	animMode = "Float"
+	lastAnimSwitch = 0
+	playFloat()
+end
+
+local function stopFlying()
+	if not flying then return end
+	flying = false
+
+	stopFlightAnims()
+
+	if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
+	if bodyVel then bodyVel:Destroy() bodyVel = nil end
+
+	if humanoid then humanoid.PlatformStand = false end
+
+	if rightShoulder and defaultShoulderC0 then
+		rightShoulder.C0 = defaultShoulderC0
 	end
 
-	local idStr = toAssetIdString(assetId)
-	if not idStr then
-		return false, "Invalid asset id."
+	restoreRunSounds()
+end
+
+--------------------------------------------------------------------
+-- UI BUILDING BLOCKS
+--------------------------------------------------------------------
+local function makeCorner(parent, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r or 12)
+	c.Parent = parent
+	return c
+end
+
+local function makeStroke(parent, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = Color3.fromRGB(200, 40, 40)
+	s.Thickness = thickness or 2
+	s.Transparency = 0.1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+local function makeGlass(parent)
+	parent.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+	parent.BackgroundTransparency = 0.18
+
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 22)),
+		ColorSequenceKeypoint.new(0.4, Color3.fromRGB(10, 10, 12)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 6, 8)),
+	})
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(1, 0.20),
+	})
+	grad.Parent = parent
+
+	local shine = Instance.new("Frame")
+	shine.Name = "Shine"
+	shine.BackgroundTransparency = 1
+	shine.Size = UDim2.new(1, -8, 0.35, 0)
+	shine.Position = UDim2.new(0, 4, 0, 4)
+	shine.Parent = parent
+
+	local shineImg = Instance.new("ImageLabel")
+	shineImg.BackgroundTransparency = 1
+	shineImg.Size = UDim2.new(1, 0, 1, 0)
+	shineImg.Image = "rbxassetid://5028857084"
+	shineImg.ImageTransparency = 0.72
+	shineImg.Parent = shine
+
+	local shineGrad = Instance.new("UIGradient")
+	shineGrad.Rotation = 0
+	shineGrad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.65),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	shineGrad.Parent = shineImg
+end
+
+local function makeText(parent, txt, size, bold)
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Text = txt or ""
+	t.TextColor3 = Color3.fromRGB(240, 240, 240)
+	t.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
+	t.TextSize = size or 16
+	t.TextXAlignment = Enum.TextXAlignment.Left
+	t.TextYAlignment = Enum.TextYAlignment.Center
+	t.TextWrapped = true
+	t.Parent = parent
+	return t
+end
+
+local function makeButton(parent, txt)
+	local b = Instance.new("TextButton")
+	b.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+	b.BackgroundTransparency = 0.2
+	b.BorderSizePixel = 0
+	b.AutoButtonColor = true
+	b.Text = txt or "Button"
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 14
+	b.TextColor3 = Color3.fromRGB(245, 245, 245)
+	b.Parent = parent
+	makeCorner(b, 10)
+
+	local st = Instance.new("UIStroke")
+	st.Color = Color3.fromRGB(200, 40, 40)
+	st.Thickness = 1
+	st.Transparency = 0.25
+	st.Parent = b
+
+	return b
+end
+
+local function makeInput(parent, placeholder)
+	local tb = Instance.new("TextBox")
+	tb.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+	tb.BackgroundTransparency = 0.15
+	tb.BorderSizePixel = 0
+	tb.ClearTextOnFocus = false
+	tb.Text = ""
+	tb.PlaceholderText = placeholder or ""
+	tb.Font = Enum.Font.Gotham
+	tb.TextSize = 14
+	tb.TextColor3 = Color3.fromRGB(245, 245, 245)
+	tb.PlaceholderColor3 = Color3.fromRGB(170, 170, 170)
+	tb.Parent = parent
+	makeCorner(tb, 10)
+
+	local st = Instance.new("UIStroke")
+	st.Color = Color3.fromRGB(200, 40, 40)
+	st.Thickness = 1
+	st.Transparency = 0.35
+	st.Parent = tb
+
+	return tb
+end
+
+local function setTabButtonActive(btn, active)
+	local st = btn:FindFirstChildOfClass("UIStroke")
+	if st then
+		st.Transparency = active and 0.05 or 0.35
+		st.Thickness = active and 2 or 1
 	end
+	btn.BackgroundTransparency = active and 0.08 or 0.22
+end
 
-	animate.Disabled = true
-	stopAllTracks(humanoid)
+--------------------------------------------------------------------
+-- LIGHTING SYSTEM (safe, no invalid .Enabled on Atmosphere/Sky)
+--------------------------------------------------------------------
+local ORIGINAL_LIGHTING = {
+	Ambient = Lighting.Ambient,
+	OutdoorAmbient = Lighting.OutdoorAmbient,
+	Brightness = Lighting.Brightness,
+	ClockTime = Lighting.ClockTime,
+	ExposureCompensation = Lighting.ExposureCompensation,
+	EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+	EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+	FogColor = Lighting.FogColor,
+	FogEnd = Lighting.FogEnd,
+	FogStart = Lighting.FogStart,
+	GeographicLatitude = Lighting.GeographicLatitude,
+}
 
-	local function setAnimValue(folderName, childName, value)
-		local f = animate:FindFirstChild(folderName)
-		if not f then return end
-		local a = f:FindFirstChild(childName)
-		if a and a:IsA("Animation") then
-			a.AnimationId = value
+local function cloneIfExists(className)
+	for _, inst in ipairs(Lighting:GetChildren()) do
+		if inst.ClassName == className then
+			return inst:Clone()
 		end
 	end
-
-	if stateName == "Idle" then
-		setAnimValue("idle", "Animation1", idStr)
-		setAnimValue("idle", "Animation2", idStr)
-	elseif stateName == "Walk" then
-		setAnimValue("walk", "WalkAnim", idStr)
-	elseif stateName == "Run" then
-		setAnimValue("run", "RunAnim", idStr)
-	elseif stateName == "Jump" then
-		setAnimValue("jump", "JumpAnim", idStr)
-	elseif stateName == "Climb" then
-		setAnimValue("climb", "ClimbAnim", idStr)
-	elseif stateName == "Fall" then
-		setAnimValue("fall", "FallAnim", idStr)
-	end
-
-	animate.Disabled = false
-	pcall(function()
-		humanoid:ChangeState(Enum.HumanoidStateType.Running)
-	end)
-
-	return true
+	return nil
 end
 
---====================================================
--- App (UI + loops)
---====================================================
-local App = {}
-App.__index = App
+ORIGINAL_LIGHTING.Sky = cloneIfExists("Sky")
+ORIGINAL_LIGHTING.Atmosphere = cloneIfExists("Atmosphere")
+ORIGINAL_LIGHTING.Bloom = cloneIfExists("BloomEffect")
+ORIGINAL_LIGHTING.ColorCorrection = cloneIfExists("ColorCorrectionEffect")
+ORIGINAL_LIGHTING.DepthOfField = cloneIfExists("DepthOfFieldEffect")
+ORIGINAL_LIGHTING.Blur = cloneIfExists("BlurEffect")
+ORIGINAL_LIGHTING.SunRays = cloneIfExists("SunRaysEffect")
 
-function App.new()
-	return setmetatable({
-		Maid = Maid.new(),
-		GUI = nil,
-
-		MenuHandle = nil,
-		MenuFrame = nil,
-		ArrowBtn = nil,
-
-		TabsBar = nil,
-		PagesHolder = nil,
-		Pages = {},
-		TabButtons = {},
-		ActivePage = "Info",
-
-		FpsLabel = nil,
-		FpsAcc = 0,
-		FpsFrames = 0,
-		FpsValue = 60,
-		RainbowHue = 0,
-
-		MenuOpen = false,
-		ToggleMenuFn = nil,
-
-		MenuOpenPos = nil,
-		MenuClosedPos = nil,
-		_MenuTween = nil,
-		_MenuAnimToken = 0,
-
-		Flight = Flight.new(),
-		Lighting = LightingCtl.new(),
-
-		OriginalWalkSpeed = nil,
-		PlayerSpeed = nil,
-
-		-- Camera feature state
-		CameraAttachChoice = "Humanoid",
-		CameraOffset = Vector3.new(0, 0, 0),
-	}, App)
+local function getOrCreateEffect(className, name)
+	local inst = Lighting:FindFirstChild(name)
+	if inst and inst.ClassName == className then
+		return inst
+	end
+	if inst then
+		inst:Destroy()
+	end
+	local newInst = Instance.new(className)
+	newInst.Name = name
+	newInst.Parent = Lighting
+	return newInst
 end
 
-function App:_makePage(name)
-	local p = Instance.new("Frame")
-	p.Name = name
-	p.BackgroundTransparency = 1
-	p.Size = UDim2.new(1, 0, 1, 0)
-	p.Visible = false
-	p.Parent = self.PagesHolder
-
-	local scroll = Instance.new("ScrollingFrame")
-	scroll.Name = "Scroll"
-	scroll.BackgroundTransparency = 1
-	scroll.BorderSizePixel = 0
-	scroll.Size = UDim2.new(1, 0, 1, 0)
-	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scroll.ScrollBarThickness = 4
-	scroll.Parent = p
-
-	local pad = Instance.new("UIPadding")
-	pad.PaddingTop = UDim.new(0, 8)
-	pad.PaddingBottom = UDim.new(0, 12)
-	pad.PaddingLeft = UDim.new(0, 6)
-	pad.PaddingRight = UDim.new(0, 6)
-	pad.Parent = scroll
-
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 10)
-	layout.Parent = scroll
-
-	self.Pages[name] = { Page = p, Scroll = scroll }
-	return p, scroll
+local function destroyIfExists(name)
+	local inst = Lighting:FindFirstChild(name)
+	if inst then inst:Destroy() end
 end
 
-function App:_switchPage(name)
-	if name == self.ActivePage then return end
-	local newPg = self.Pages[name]
-	local oldPg = self.Pages[self.ActivePage]
-	if not newPg then return end
+local SKY_PRESETS = {
+	["Crimson Night"] = {
+		Sky = {
+			Bk = "rbxassetid://401664839",
+			Dn = "rbxassetid://401664862",
+			Ft = "rbxassetid://401664960",
+			Lf = "rbxassetid://401664881",
+			Rt = "rbxassetid://401664901",
+			Up = "rbxassetid://401664936",
+		},
+	},
+	["Deep Space"] = {
+		Sky = {
+			Bk = "rbxassetid://149397692",
+			Dn = "rbxassetid://149397686",
+			Ft = "rbxassetid://149397697",
+			Lf = "rbxassetid://149397684",
+			Rt = "rbxassetid://149397688",
+			Up = "rbxassetid://149397702",
+		},
+	},
+	["Vaporwave Nebula"] = {
+		Sky = {
+			Bk = "rbxassetid://1417494030",
+			Dn = "rbxassetid://1417494146",
+			Ft = "rbxassetid://1417494253",
+			Lf = "rbxassetid://1417494402",
+			Rt = "rbxassetid://1417494499",
+			Up = "rbxassetid://1417494643",
+		},
+	},
+	["Soft Clouds"] = {
+		Sky = {
+			Bk = "rbxassetid://570557514",
+			Dn = "rbxassetid://570557775",
+			Ft = "rbxassetid://570557559",
+			Lf = "rbxassetid://570557620",
+			Rt = "rbxassetid://570557672",
+			Up = "rbxassetid://570557727",
+		},
+	},
+	["Cloudy Skies"] = {
+		Sky = {
+			Bk = "rbxassetid://252760981",
+			Dn = "rbxassetid://252763035",
+			Ft = "rbxassetid://252761439",
+			Lf = "rbxassetid://252760980",
+			Rt = "rbxassetid://252760986",
+			Up = "rbxassetid://252762652",
+		},
+	},
+}
 
-	for tabName, btn in pairs(self.TabButtons) do
-		setTabActive(btn, tabName == name)
-	end
+local LightingState = {
+	Enabled = true,
+	SelectedSky = nil,
+	Toggles = {
+		Sky = true,
+		Atmosphere = true,
+		ColorCorrection = true,
+		Bloom = true,
+		DepthOfField = true,
+		MotionBlur = true,
+		SunRays = true,
+	},
+}
 
-	local newFrame = newPg.Page
-	local oldFrame = oldPg and oldPg.Page or nil
-
-	newFrame.Visible = true
-	newFrame.Position = UDim2.new(0, 26, 0, 0)
-	TweenService:Create(newFrame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Position = UDim2.new(0, 0, 0, 0)
-	}):Play()
-
-	if oldFrame then
-		local t = TweenService:Create(oldFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-			Position = UDim2.new(0, -26, 0, 0)
-		})
-		t:Play()
-		t.Completed:Connect(function()
-			oldFrame.Visible = false
-			oldFrame.Position = UDim2.new(0, 0, 0, 0)
-		end)
-	end
-
-	self.ActivePage = name
+local function writeLightingSaveState()
+	_G.__SOS_LightingSaveState = {
+		Enabled = LightingState.Enabled,
+		SelectedSky = LightingState.SelectedSky,
+		Toggles = LightingState.Toggles,
+	}
+	scheduleSave()
 end
 
-function App:_addTab(name, order)
-	local b = UI.Button(self.TabsBar, name)
-	b.LayoutOrder = order or 1
-	b.Size = UDim2.new(0, 120, 0, 38)
-	self.TabButtons[name] = b
-
-	self.Maid:Give(b.MouseButton1Click:Connect(function()
-		self:_switchPage(name)
-	end))
-end
-
-function App:_setMenu(open, instant)
-	self.MenuOpen = open
-	if self.ArrowBtn then
-		self.ArrowBtn.Text = open and "˅" or "˄"
-	end
-
-	if not self.MenuFrame or not self.MenuOpenPos or not self.MenuClosedPos then
-		return
-	end
-
-	self._MenuAnimToken += 1
-	local token = self._MenuAnimToken
-
-	if self._MenuTween then
-		pcall(function() self._MenuTween:Cancel() end)
-		self._MenuTween = nil
-	end
-
-	local openPos = self.MenuOpenPos
-	local closedPos = self.MenuClosedPos
-
-	if instant then
-		if open then
-			self.MenuFrame.Visible = true
-			self.MenuFrame.Position = openPos
-			self.MenuFrame.BackgroundTransparency = 0.18
-		else
-			self.MenuFrame.Visible = false
-			self.MenuFrame.Position = closedPos
-			self.MenuFrame.BackgroundTransparency = 1
-		end
-		return
-	end
-
-	if open then
-		self.MenuFrame.Visible = true
-		self.MenuFrame.Position = closedPos
-		self.MenuFrame.BackgroundTransparency = 1
-
-		local tw = TweenService:Create(self.MenuFrame, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Position = openPos,
-			BackgroundTransparency = 0.18
-		})
-		self._MenuTween = tw
-		tw:Play()
-	else
-		self.MenuFrame.Visible = true
-		local tw = TweenService:Create(self.MenuFrame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-			Position = closedPos,
-			BackgroundTransparency = 1
-		})
-		self._MenuTween = tw
-		tw:Play()
-		tw.Completed:Connect(function()
-			if self._MenuAnimToken ~= token then return end
-			if not self.MenuOpen then
-				self.MenuFrame.Visible = false
+local function readLightingSaveState()
+	local s = _G.__SOS_LightingSaveState
+	if typeof(s) ~= "table" then return end
+	if typeof(s.Enabled) == "boolean" then LightingState.Enabled = s.Enabled end
+	if typeof(s.SelectedSky) == "string" then LightingState.SelectedSky = s.SelectedSky end
+	if typeof(s.Toggles) == "table" then
+		for k, v in pairs(s.Toggles) do
+			if typeof(v) == "boolean" and LightingState.Toggles[k] ~= nil then
+				LightingState.Toggles[k] = v
 			end
+		end
+	end
+end
+
+local function applyFancyDefaults()
+	Lighting.Brightness = 2
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 1
+	Lighting.ExposureCompensation = 0.15
+end
+
+local function removeSOSLightingOnly()
+	for _, name in ipairs({
+		"SOS_Sky",
+		"SOS_Atmosphere",
+		"SOS_Bloom",
+		"SOS_ColorCorrection",
+		"SOS_DepthOfField",
+		"SOS_MotionBlur",
+		"SOS_SunRays",
+	}) do
+		destroyIfExists(name)
+	end
+end
+
+local function applySkyPreset(name)
+	LightingState.SelectedSky = name
+	writeLightingSaveState()
+
+	if not LightingState.Enabled then return end
+	local preset = SKY_PRESETS[name]
+	if not preset then return end
+
+	applyFancyDefaults()
+
+	if LightingState.Toggles.Sky then
+		local sky = getOrCreateEffect("Sky", "SOS_Sky")
+		sky.SkyboxBk = preset.Sky.Bk
+		sky.SkyboxDn = preset.Sky.Dn
+		sky.SkyboxFt = preset.Sky.Ft
+		sky.SkyboxLf = preset.Sky.Lf
+		sky.SkyboxRt = preset.Sky.Rt
+		sky.SkyboxUp = preset.Sky.Up
+	else
+		destroyIfExists("SOS_Sky")
+	end
+
+	if LightingState.Toggles.ColorCorrection then
+		local cc = getOrCreateEffect("ColorCorrectionEffect", "SOS_ColorCorrection")
+		cc.Enabled = true
+		cc.Brightness = 0.02
+		cc.Contrast = 0.18
+		cc.Saturation = 0.06
+		cc.TintColor = Color3.fromRGB(255, 240, 240)
+	else
+		destroyIfExists("SOS_ColorCorrection")
+	end
+
+	if LightingState.Toggles.Bloom then
+		local bloom = getOrCreateEffect("BloomEffect", "SOS_Bloom")
+		bloom.Enabled = true
+		bloom.Intensity = 0.8
+		bloom.Size = 28
+		bloom.Threshold = 1
+	else
+		destroyIfExists("SOS_Bloom")
+	end
+
+	if LightingState.Toggles.DepthOfField then
+		local dof = getOrCreateEffect("DepthOfFieldEffect", "SOS_DepthOfField")
+		dof.Enabled = true
+		dof.FarIntensity = 0.12
+		dof.FocusDistance = 55
+		dof.InFocusRadius = 40
+		dof.NearIntensity = 0.25
+	else
+		destroyIfExists("SOS_DepthOfField")
+	end
+
+	if LightingState.Toggles.MotionBlur then
+		local blur = getOrCreateEffect("BlurEffect", "SOS_MotionBlur")
+		blur.Enabled = true
+		blur.Size = 2
+	else
+		destroyIfExists("SOS_MotionBlur")
+	end
+
+	if LightingState.Toggles.SunRays then
+		local rays = getOrCreateEffect("SunRaysEffect", "SOS_SunRays")
+		rays.Enabled = true
+		rays.Intensity = 0.06
+		rays.Spread = 0.75
+	else
+		destroyIfExists("SOS_SunRays")
+	end
+
+	-- Atmosphere has no .Enabled, so we toggle by creating/destroying it
+	if LightingState.Toggles.Atmosphere then
+		local atm = getOrCreateEffect("Atmosphere", "SOS_Atmosphere")
+		atm.Density = 0.32
+		atm.Offset = 0.1
+		atm.Color = Color3.fromRGB(210, 200, 255)
+		atm.Decay = Color3.fromRGB(70, 60, 90)
+		atm.Glare = 0.12
+		atm.Haze = 1
+	else
+		destroyIfExists("SOS_Atmosphere")
+	end
+end
+
+local function resetLightingToOriginal()
+	removeSOSLightingOnly()
+
+	Lighting.Ambient = ORIGINAL_LIGHTING.Ambient
+	Lighting.OutdoorAmbient = ORIGINAL_LIGHTING.OutdoorAmbient
+	Lighting.Brightness = ORIGINAL_LIGHTING.Brightness
+	Lighting.ClockTime = ORIGINAL_LIGHTING.ClockTime
+	Lighting.ExposureCompensation = ORIGINAL_LIGHTING.ExposureCompensation
+	Lighting.EnvironmentDiffuseScale = ORIGINAL_LIGHTING.EnvironmentDiffuseScale
+	Lighting.EnvironmentSpecularScale = ORIGINAL_LIGHTING.EnvironmentSpecularScale
+	Lighting.FogColor = ORIGINAL_LIGHTING.FogColor
+	Lighting.FogEnd = ORIGINAL_LIGHTING.FogEnd
+	Lighting.FogStart = ORIGINAL_LIGHTING.FogStart
+	Lighting.GeographicLatitude = ORIGINAL_LIGHTING.GeographicLatitude
+
+	local function restoreClone(cloneObj, className)
+		if not cloneObj then return end
+		for _, inst in ipairs(Lighting:GetChildren()) do
+			if inst.ClassName == className then
+				inst:Destroy()
+			end
+		end
+		local c = cloneObj:Clone()
+		c.Parent = Lighting
+	end
+
+	restoreClone(ORIGINAL_LIGHTING.Sky, "Sky")
+	restoreClone(ORIGINAL_LIGHTING.Atmosphere, "Atmosphere")
+	restoreClone(ORIGINAL_LIGHTING.Bloom, "BloomEffect")
+	restoreClone(ORIGINAL_LIGHTING.ColorCorrection, "ColorCorrectionEffect")
+	restoreClone(ORIGINAL_LIGHTING.DepthOfField, "DepthOfFieldEffect")
+	restoreClone(ORIGINAL_LIGHTING.Blur, "BlurEffect")
+	restoreClone(ORIGINAL_LIGHTING.SunRays, "SunRaysEffect")
+
+	LightingState.SelectedSky = nil
+	writeLightingSaveState()
+end
+
+local function syncLightingToggles()
+	if not LightingState.Enabled then
+		removeSOSLightingOnly()
+		return
+	end
+
+	if LightingState.SelectedSky and SKY_PRESETS[LightingState.SelectedSky] then
+		applySkyPreset(LightingState.SelectedSky)
+	else
+		-- Even if no sky chosen, keep toggles consistent
+		if not LightingState.Toggles.Sky then destroyIfExists("SOS_Sky") end
+		if not LightingState.Toggles.Atmosphere then destroyIfExists("SOS_Atmosphere") end
+		if not LightingState.Toggles.ColorCorrection then destroyIfExists("SOS_ColorCorrection") end
+		if not LightingState.Toggles.Bloom then destroyIfExists("SOS_Bloom") end
+		if not LightingState.Toggles.DepthOfField then destroyIfExists("SOS_DepthOfField") end
+		if not LightingState.Toggles.MotionBlur then destroyIfExists("SOS_MotionBlur") end
+		if not LightingState.Toggles.SunRays then destroyIfExists("SOS_SunRays") end
+	end
+end
+
+--------------------------------------------------------------------
+-- CAMERA APPLY
+--------------------------------------------------------------------
+local function resolveCameraSubject(mode)
+	if not character then return nil end
+	if mode == "Humanoid" then
+		return humanoid
+	end
+	if mode == "Head" then
+		return character:FindFirstChild("Head") or humanoid
+	end
+	if mode == "HumanoidRootPart" then
+		return character:FindFirstChild("HumanoidRootPart") or humanoid
+	end
+	if mode == "Torso" then
+		return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or humanoid
+	end
+	if mode == "UpperTorso" then
+		return character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso") or humanoid
+	end
+	if mode == "LowerTorso" then
+		return character:FindFirstChild("LowerTorso") or humanoid
+	end
+	return humanoid
+end
+
+local function applyCameraSettings()
+	if not camera then return end
+
+	LocalPlayer.CameraMaxZoomDistance = camMaxZoom or INFINITE_ZOOM
+	LocalPlayer.CameraMinZoomDistance = DEFAULT_CAM_MIN_ZOOM or 0.5
+
+	if camFov then
+		camera.FieldOfView = camFov
+	end
+
+	local subject = resolveCameraSubject(camSubjectMode)
+	if subject then
+		camera.CameraSubject = subject
+	end
+
+	if humanoid then
+		humanoid.CameraOffset = camOffset
+	end
+end
+
+local function resetCameraToDefaults()
+	if DEFAULT_FOV and camera then
+		camFov = DEFAULT_FOV
+		camera.FieldOfView = DEFAULT_FOV
+	end
+
+	if DEFAULT_CAM_MIN_ZOOM ~= nil then
+		LocalPlayer.CameraMinZoomDistance = DEFAULT_CAM_MIN_ZOOM
+	end
+
+	camMaxZoom = INFINITE_ZOOM
+	LocalPlayer.CameraMaxZoomDistance = camMaxZoom
+
+	camSubjectMode = DEFAULT_CAMERA_SUBJECT_MODE
+	camOffset = Vector3.new(0, 0, 0)
+	if humanoid then
+		humanoid.CameraOffset = camOffset
+	end
+
+	applyCameraSettings()
+	scheduleSave()
+end
+
+--------------------------------------------------------------------
+-- PLAYER SPEED APPLY
+--------------------------------------------------------------------
+local function applyPlayerSpeed()
+	if humanoid and playerSpeed then
+		humanoid.WalkSpeed = playerSpeed
+	end
+end
+
+local function resetPlayerSpeedToDefault()
+	if humanoid then
+		if DEFAULT_WALKSPEED == nil then
+			DEFAULT_WALKSPEED = humanoid.WalkSpeed
+		end
+		playerSpeed = DEFAULT_WALKSPEED
+		humanoid.WalkSpeed = DEFAULT_WALKSPEED
+	end
+	scheduleSave()
+end
+
+--------------------------------------------------------------------
+-- MIC UP VIP TOOL
+--------------------------------------------------------------------
+local function ownsAnyVipPass()
+	for _, id in ipairs(VIP_GAMEPASSES) do
+		local ok, owned = pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(LocalPlayer.UserId, id)
 		end)
-	end
-end
-
-function App:_ensureOriginalWalkSpeed(hum)
-	if not hum then return end
-	if self.OriginalWalkSpeed == nil then
-		self.OriginalWalkSpeed = hum.WalkSpeed
-	end
-end
-
-function App:_applyCustomWalkSpeedRule(hum, stateName)
-	if not hum then return end
-	self:_ensureOriginalWalkSpeed(hum)
-
-	if stateName == "Walk" then
-		local base = self.OriginalWalkSpeed or hum.WalkSpeed
-		local slowed = math.max(CUSTOM_WALK_MIN, math.floor(base * CUSTOM_WALK_SLOW_MULT + 0.5))
-		hum.WalkSpeed = slowed
-	elseif stateName == "Run" then
-		if self.OriginalWalkSpeed then
-			hum.WalkSpeed = self.OriginalWalkSpeed
+		if ok and owned then
+			return true
 		end
 	end
+	return false
 end
 
-function App:SetPlayerSpeed(speed)
-	local s = tonumber(speed)
-	if not s then return false end
-	s = math.clamp(s, CONFIG.Player.SpeedMin, CONFIG.Player.SpeedMax)
-	s = math.floor(s + 0.5)
-
-	local char = LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum then
-		self.PlayerSpeed = s
-		return true
+local function giveBetterSpeedCoil()
+	if not character or not humanoid then
+		notify("Better Speed Coil", "Character not ready.", 2)
+		return
 	end
 
-	self.PlayerSpeed = s
-	self.OriginalWalkSpeed = s
-	hum.WalkSpeed = s
-	return true
-end
+	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+	if not backpack then
+		notify("Better Speed Coil", "Backpack not found.", 2)
+		return
+	end
 
---====================================================
--- Camera features (kept: attach + offset)
---====================================================
-function App:SetCameraOffset(x, y, z)
-	local nx = tonumber(x) or self.CameraOffset.X
-	local ny = tonumber(y) or self.CameraOffset.Y
-	local nz = tonumber(z) or self.CameraOffset.Z
-	self.CameraOffset = Vector3.new(nx, ny, nz)
-	self:ApplyCameraSettings()
-end
+	-- Prevent duplicates
+	if backpack:FindFirstChild("Better Speed Coil") or character:FindFirstChild("Better Speed Coil") then
+		notify("Better Speed Coil", "You already have it.", 2)
+		return
+	end
 
-function App:SetCameraAttach(choice)
-	self.CameraAttachChoice = tostring(choice or "Humanoid")
-	self:ApplyCameraSettings()
-end
+	local tool = Instance.new("Tool")
+	tool.Name = "Better Speed Coil"
+	tool.RequiresHandle = false
+	tool.CanBeDropped = false
+	tool.ManualActivationOnly = true
 
-function App:ApplyCameraSettings()
-	local char = LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not char or not hum or not Camera then return end
-
-	pcall(function()
-		hum.CameraOffset = self.CameraOffset
+	local last = nil
+	tool.Equipped:Connect(function()
+		if humanoid then
+			last = humanoid.WalkSpeed
+			humanoid.WalkSpeed = 111
+		end
 	end)
 
-	local subject = hum
-	if self.CameraAttachChoice ~= "Humanoid" then
-		local part = char:FindFirstChild(self.CameraAttachChoice)
-		if not part and self.CameraAttachChoice == "UpperTorso" then part = char:FindFirstChild("Torso") end
-		if not part and self.CameraAttachChoice == "LowerTorso" then part = char:FindFirstChild("Torso") end
-		if part then
-			subject = part
+	tool.Unequipped:Connect(function()
+		if humanoid then
+			if last then
+				humanoid.WalkSpeed = last
+			else
+				humanoid.WalkSpeed = humanoid.WalkSpeed
+			end
 		end
-	end
-
-	pcall(function()
-		Camera.CameraType = Enum.CameraType.Custom
-		Camera.CameraSubject = subject
 	end)
+
+	tool.Parent = backpack
+	notify("Better Speed Coil", "Added to your inventory.", 2)
 end
 
---====================================================
--- UI helpers for sliders
---====================================================
-function App:_makeSlider(parent, titleText, minV, maxV, getV, setV)
-	local wrap = Instance.new("Frame")
-	wrap.BackgroundTransparency = 1
-	wrap.Size = UDim2.new(1, 0, 0, 56)
-	wrap.Parent = parent
+--------------------------------------------------------------------
+-- UI: BUILD
+--------------------------------------------------------------------
+local function createUI()
+	safeDestroy(gui)
 
-	local label = UI.Text(wrap, "", 14, true)
-	label.Size = UDim2.new(1, 0, 0, 18)
-
-	local sliderBg = Instance.new("Frame")
-	sliderBg.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-	sliderBg.BackgroundTransparency = 0.15
-	sliderBg.BorderSizePixel = 0
-	sliderBg.Position = UDim2.new(0, 0, 0, 26)
-	sliderBg.Size = UDim2.new(1, 0, 0, 10)
-	sliderBg.Parent = wrap
-	UI.Corner(sliderBg, 999)
-
-	local sliderFill = Instance.new("Frame")
-	sliderFill.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
-	sliderFill.BorderSizePixel = 0
-	sliderFill.Size = UDim2.new(0, 0, 1, 0)
-	sliderFill.Parent = sliderBg
-	UI.Corner(sliderFill, 999)
-
-	local knob = Instance.new("Frame")
-	knob.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
-	knob.BorderSizePixel = 0
-	knob.Size = UDim2.new(0, 14, 0, 14)
-	knob.Parent = sliderBg
-	UI.Corner(knob, 999)
-
-	local function setFromAlpha(a)
-		a = clamp01(a)
-		local v = minV + (maxV - minV) * a
-		setV(v)
-		label.Text = titleText .. ": " .. tostring(math.floor((getV() * 100) + 0.5) / 100)
-		sliderFill.Size = UDim2.new(a, 0, 1, 0)
-		knob.Position = UDim2.new(a, -7, 0.5, -7)
-	end
-
-	local function refresh()
-		local v = getV()
-		local a = 0
-		if maxV ~= minV then
-			a = (v - minV) / (maxV - minV)
-		end
-		setFromAlpha(a)
-	end
-
-	refresh()
-
-	local dragging = false
-	self.Maid:Give(sliderBg.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-		end
-	end))
-	self.Maid:Give(sliderBg.InputEnded:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging = false
-		end
-	end))
-	self.Maid:Give(UserInputService.InputChanged:Connect(function(i)
-		if not dragging then return end
-		if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
-		local a = (i.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X
-		setFromAlpha(a)
-	end))
-
-	return refresh
-end
-
---====================================================
--- Build UI
---====================================================
-function App:BuildUI()
-	if self.GUI then self.GUI:Destroy() end
-
-	local gui = Instance.new("ScreenGui")
+	gui = Instance.new("ScreenGui")
 	gui.Name = "SOS_HUD"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-	self.GUI = gui
-	self.Maid:Give(gui)
 
-	local fps = Instance.new("TextLabel")
-	fps.Name = "FPS"
-	fps.BackgroundTransparency = 1
-	fps.AnchorPoint = Vector2.new(1, 1)
-	fps.Position = UDim2.new(1, -6, 1, -6)
-	fps.Size = UDim2.new(0, 140, 0, 18)
-	fps.Font = Enum.Font.GothamBold
-	fps.TextSize = 12
-	fps.TextXAlignment = Enum.TextXAlignment.Right
-	fps.TextYAlignment = Enum.TextYAlignment.Bottom
-	fps.Text = "fps"
-	fps.TextColor3 = Color3.fromRGB(80, 255, 80)
-	fps.Parent = gui
-	self.FpsLabel = fps
+	ensureClickSoundTemplate()
+	setupGlobalButtonSounds(gui)
 
-	local handle = Instance.new("Frame")
-	handle.Name = "MenuHandle"
-	handle.AnchorPoint = Vector2.new(0.5, 0)
-	handle.Position = UDim2.new(0.5, 0, 0, 6)
-	handle.Size = CONFIG.UI.HandleSize
-	handle.BorderSizePixel = 0
-	handle.Parent = gui
-	UI.Corner(handle, 16)
-	UI.Glass(handle)
-	UI.Stroke(handle, 2)
-	self.MenuHandle = handle
+	-- Intro sound only
+	playIntroSoundOnly()
 
-	local arrow = Instance.new("TextButton")
-	arrow.Name = "Arrow"
-	arrow.BackgroundTransparency = 1
-	arrow.Size = UDim2.new(0, 40, 0, 40)
-	arrow.Position = UDim2.new(0, 8, 0, 1)
-	arrow.Text = "˄"
-	arrow.Font = Enum.Font.GothamBold
-	arrow.TextSize = 22
-	arrow.TextColor3 = Color3.fromRGB(240, 240, 240)
-	arrow.Parent = handle
-	attachButtonClickSound(arrow)
-	self.ArrowBtn = arrow
+	-- FPS label
+	fpsLabel = Instance.new("TextLabel")
+	fpsLabel.Name = "FPS"
+	fpsLabel.BackgroundTransparency = 1
+	fpsLabel.AnchorPoint = Vector2.new(1, 1)
+	fpsLabel.Position = UDim2.new(1, -6, 1, -6)
+	fpsLabel.Size = UDim2.new(0, 140, 0, 18)
+	fpsLabel.Font = Enum.Font.GothamBold
+	fpsLabel.TextSize = 12
+	fpsLabel.TextXAlignment = Enum.TextXAlignment.Right
+	fpsLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+	fpsLabel.Text = "fps"
+	fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+	fpsLabel.Parent = gui
+
+	-- Handle
+	menuHandle = Instance.new("Frame")
+	menuHandle.Name = "MenuHandle"
+	menuHandle.AnchorPoint = Vector2.new(0.5, 0)
+	menuHandle.Position = UDim2.new(0.5, 0, 0, 6)
+	menuHandle.Size = UDim2.new(0, 560, 0, 42)
+	menuHandle.BorderSizePixel = 0
+	menuHandle.Parent = gui
+	makeCorner(menuHandle, 16)
+	makeGlass(menuHandle)
+	makeStroke(menuHandle, 2)
+
+	arrowButton = Instance.new("TextButton")
+	arrowButton.Name = "Arrow"
+	arrowButton.BackgroundTransparency = 1
+	arrowButton.Size = UDim2.new(0, 40, 0, 40)
+	arrowButton.Position = UDim2.new(0, 8, 0, 1)
+	arrowButton.Text = "˄"
+	arrowButton.Font = Enum.Font.GothamBold
+	arrowButton.TextSize = 22
+	arrowButton.TextColor3 = Color3.fromRGB(240, 240, 240)
+	arrowButton.Parent = menuHandle
 
 	local title = Instance.new("TextLabel")
 	title.BackgroundTransparency = 1
@@ -1897,27 +1645,22 @@ function App:BuildUI()
 	title.Text = "SOS HUD"
 	title.TextColor3 = Color3.fromRGB(245, 245, 245)
 	title.TextXAlignment = Enum.TextXAlignment.Center
-	title.Parent = handle
+	title.Parent = menuHandle
 
-	local menu = Instance.new("Frame")
-	menu.Name = "Menu"
-	menu.AnchorPoint = Vector2.new(0.5, 0)
-	menu.Position = UDim2.new(0.5, 0, 0, 52)
-	menu.Size = CONFIG.UI.MenuSize
-	menu.BorderSizePixel = 0
-	menu.Parent = gui
-	UI.Corner(menu, 16)
-	UI.Glass(menu)
-	UI.Stroke(menu, 2)
-	self.MenuFrame = menu
+	-- Menu frame
+	menuFrame = Instance.new("Frame")
+	menuFrame.Name = "Menu"
+	menuFrame.AnchorPoint = Vector2.new(0.5, 0)
+	menuFrame.Position = UDim2.new(0.5, 0, 0, 52)
+	menuFrame.Size = UDim2.new(0, 560, 0, 390)
+	menuFrame.BorderSizePixel = 0
+	menuFrame.Parent = gui
+	makeCorner(menuFrame, 16)
+	makeGlass(menuFrame)
+	makeStroke(menuFrame, 2)
 
-	self.MenuOpenPos = menu.Position
-	self.MenuClosedPos = UDim2.new(
-		self.MenuOpenPos.X.Scale, self.MenuOpenPos.X.Offset,
-		self.MenuOpenPos.Y.Scale, self.MenuOpenPos.Y.Offset - (menu.Size.Y.Offset + 10)
-	)
-
-	local tabsBar = Instance.new("ScrollingFrame")
+	-- Tabs bar
+	tabsBar = Instance.new("ScrollingFrame")
 	tabsBar.Name = "TabsBar"
 	tabsBar.BackgroundTransparency = 1
 	tabsBar.BorderSizePixel = 0
@@ -1927,8 +1670,7 @@ function App:BuildUI()
 	tabsBar.ScrollBarThickness = 2
 	tabsBar.ScrollingDirection = Enum.ScrollingDirection.X
 	tabsBar.AutomaticCanvasSize = Enum.AutomaticSize.X
-	tabsBar.Parent = menu
-	self.TabsBar = tabsBar
+	tabsBar.Parent = menuFrame
 
 	local tabsLayout = Instance.new("UIListLayout")
 	tabsLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -1936,36 +1678,77 @@ function App:BuildUI()
 	tabsLayout.Padding = UDim.new(0, 10)
 	tabsLayout.Parent = tabsBar
 
-	local holder = Instance.new("Frame")
-	holder.Name = "PagesHolder"
-	holder.BackgroundTransparency = 1
-	holder.Position = UDim2.new(0, 14, 0, 66)
-	holder.Size = UDim2.new(1, -28, 1, -80)
-	holder.ClipsDescendants = true
-	holder.Parent = menu
-	self.PagesHolder = holder
+	-- Pages holder
+	pagesHolder = Instance.new("Frame")
+	pagesHolder.Name = "PagesHolder"
+	pagesHolder.BackgroundTransparency = 1
+	pagesHolder.Position = UDim2.new(0, 14, 0, 66)
+	pagesHolder.Size = UDim2.new(1, -28, 1, -80)
+	pagesHolder.ClipsDescendants = true
+	pagesHolder.Parent = menuFrame
 
-	local _, infoScroll = self:_makePage("Info")
-	local _, controlsScroll = self:_makePage("Controls")
-	local _, flyScroll = self:_makePage("Fly")
-	local _, animScroll = self:_makePage("Anim Packs")
-	local _, playerScroll = self:_makePage("Player")
-	local _, camScroll = self:_makePage("Camera")
-	local _, lightScroll = self:_makePage("Lighting")
-	local _, serverScroll = self:_makePage("Server")
-	local _, clientScroll = self:_makePage("Client")
+	local pages = {}
+	local function makePage(name)
+		local p = Instance.new("Frame")
+		p.Name = name
+		p.BackgroundTransparency = 1
+		p.Size = UDim2.new(1, 0, 1, 0)
+		p.Position = UDim2.new(0, 0, 0, 0)
+		p.Visible = false
+		p.Parent = pagesHolder
 
-	local micupScroll = nil
-	if CONFIG.MicUp.PlaceIds[tostring(game.PlaceId)] then
-		_, micupScroll = self:_makePage("Mic up")
+		local scroll = Instance.new("ScrollingFrame")
+		scroll.Name = "Scroll"
+		scroll.BackgroundTransparency = 1
+		scroll.BorderSizePixel = 0
+		scroll.Size = UDim2.new(1, 0, 1, 0)
+		scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		scroll.ScrollBarThickness = 4
+		scroll.Parent = p
+
+		local pad = Instance.new("UIPadding")
+		pad.PaddingTop = UDim.new(0, 8)
+		pad.PaddingBottom = UDim.new(0, 12)
+		pad.PaddingLeft = UDim.new(0, 6)
+		pad.PaddingRight = UDim.new(0, 6)
+		pad.Parent = scroll
+
+		local layout = Instance.new("UIListLayout")
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Padding = UDim.new(0, 10)
+		layout.Parent = scroll
+
+		pages[name] = { Page = p, Scroll = scroll }
+		return p, scroll
 	end
 
-	-- INFO TAB
+	local infoPage, infoScroll = makePage("Info")
+	local controlsPage, controlsScroll = makePage("Controls")
+	local flyPage, flyScroll = makePage("Fly")
+	local animPage, animScroll = makePage("Anim Packs")
+	local playerPage, playerScroll = makePage("Player")
+	local cameraPage, cameraScroll = makePage("Camera")
+	local lightingPage, lightingScroll = makePage("Lighting")
+	local serverPage, serverScroll = makePage("Server")
+	local clientPage, clientScroll = makePage("Client")
+
+	local micupPage, micupScroll = nil, nil
 	do
-		local header = UI.Text(infoScroll, "The Sins Of Scripting HUD", 16, true)
+		local placeIdStr = tostring(game.PlaceId)
+		if MICUP_PLACE_IDS[placeIdStr] then
+			micupPage, micupScroll = makePage("Mic up")
+		end
+	end
+
+	----------------------------------------------------------------
+	-- INFO TAB
+	----------------------------------------------------------------
+	do
+		local header = makeText(infoScroll, "The Sins Of Scripting HUD", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local msg = UI.Text(infoScroll,
+		local msg = makeText(infoScroll,
 			"Welcome.\n\nDiscord:\nPress to copy, or it will open if copy isn't supported.\n",
 			14, false
 		)
@@ -1982,18 +1765,18 @@ function App:BuildUI()
 		rowLay.VerticalAlignment = Enum.VerticalAlignment.Center
 		rowLay.Parent = row
 
-		local discordBtn = UI.Button(row, "(SOS Server)")
+		local discordBtn = makeButton(row, "(SOS Server)")
 		discordBtn.Size = UDim2.new(0, 180, 0, 36)
 
-		local linkBox = UI.Input(row, "Press to copy")
+		local linkBox = makeInput(row, "Press to copy")
 		linkBox.Size = UDim2.new(1, -200, 0, 36)
-		linkBox.Text = CONFIG.DiscordLink
+		linkBox.Text = DISCORD_LINK
 
-		self.Maid:Give(discordBtn.MouseButton1Click:Connect(function()
+		discordBtn.MouseButton1Click:Connect(function()
 			local copied = false
 			pcall(function()
 				if typeof(setclipboard) == "function" then
-					setclipboard(CONFIG.DiscordLink)
+					setclipboard(DISCORD_LINK)
 					copied = true
 				end
 			end)
@@ -2002,42 +1785,86 @@ function App:BuildUI()
 				notify("SOS Server", "Copied to clipboard.", 2)
 			else
 				pcall(function() linkBox:CaptureFocus() end)
-				pcall(function() GuiService:OpenBrowserWindow(CONFIG.DiscordLink) end)
+				pcall(function() GuiService:OpenBrowserWindow(DISCORD_LINK) end)
 				notify("SOS Server", "Press to copy (use the box).", 3)
 			end
-		end))
+		end)
 	end
 
+	----------------------------------------------------------------
 	-- CONTROLS TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(controlsScroll, "Controls", 16, true)
+		local header = makeText(controlsScroll, "Controls", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local t = UI.Text(controlsScroll,
-			"PC:\n- Fly Toggle: F\n- Menu Toggle: H\n- Move: WASD\n- Up/Down: Q/E\n\nMouse Look:\n- Flight faces where your camera looks (up/down works).\n\nExtra Tilt:\n- Hold Q: tilt 90 degrees down\n- Hold E: no tilt\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu",
+		local info = makeText(controlsScroll,
+			"PC:\n- Fly Toggle: " .. flightToggleKey.Name .. "\n- Menu Toggle: " .. menuToggleKey.Name .. "\n- Move: WASD + Q/E\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu",
 			14, false
 		)
-		t.Size = UDim2.new(1, 0, 0, 260)
+		info.Size = UDim2.new(1, 0, 0, 130)
+
+		local bindRow = Instance.new("Frame")
+		bindRow.BackgroundTransparency = 1
+		bindRow.Size = UDim2.new(1, 0, 0, 74)
+		bindRow.Parent = controlsScroll
+
+		local function makeBindLine(labelText, getKeyFn, setKeyFn)
+			local line = Instance.new("Frame")
+			line.BackgroundTransparency = 1
+			line.Size = UDim2.new(1, 0, 0, 32)
+			line.Parent = bindRow
+
+			local l = makeText(line, labelText, 14, true)
+			l.Size = UDim2.new(0, 170, 1, 0)
+
+			local btn = makeButton(line, getKeyFn().Name)
+			btn.Size = UDim2.new(0, 110, 0, 30)
+			btn.Position = UDim2.new(0, 180, 0, 1)
+
+			local hint = makeText(line, "Click then press a key", 12, false)
+			hint.Size = UDim2.new(1, -300, 1, 0)
+			hint.Position = UDim2.new(0, 300, 0, 0)
+			hint.TextColor3 = Color3.fromRGB(190, 190, 190)
+
+			local waiting = false
+			btn.MouseButton1Click:Connect(function()
+				waiting = true
+				btn.Text = "..."
+			end)
+
+			UserInputService.InputBegan:Connect(function(input, gp)
+				if gp then return end
+				if not waiting then return end
+				if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+				waiting = false
+				setKeyFn(input.KeyCode)
+				btn.Text = getKeyFn().Name
+				scheduleSave()
+			end)
+		end
+
+		makeBindLine("Flight Toggle Key:", function() return flightToggleKey end, function(k) flightToggleKey = k end)
+		makeBindLine("Menu Toggle Key:", function() return menuToggleKey end, function(k) menuToggleKey = k end)
 	end
 
+	----------------------------------------------------------------
 	-- FLY TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(flyScroll, "Flight", 16, true)
+		local header = makeText(flyScroll, "Flight Emotes", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local warn = UI.Text(flyScroll,
-			"Flight emote IDs must be published Creator Store emotes.\nIf you paste random IDs, it can fail.",
+		local keyLegend = makeText(flyScroll, "A = Apply    R = Reset", 13, true)
+		keyLegend.Size = UDim2.new(1, 0, 0, 18)
+		keyLegend.TextColor3 = Color3.fromRGB(220, 220, 220)
+
+		local warning = makeText(flyScroll,
+			"Animation IDs for flight must be a Published Marketplace/Catalog EMOTE assetid from the Creator Store.\n(If you paste random IDs, it can fail.)\n(copy and paste id in the link of the creator store version or the chosen Emote (Wont Work With Normal Marketplace ID))",
 			13, false
 		)
-		warn.Size = UDim2.new(1, 0, 0, 44)
-		warn.TextColor3 = Color3.fromRGB(210, 210, 210)
-
-		local emHdr = UI.Text(flyScroll, "Flight Emotes", 16, true)
-		emHdr.Size = UDim2.new(1, 0, 0, 22)
-
-		local arNote = UI.Text(flyScroll, "A = Apply    R = Reset", 13, true)
-		arNote.Size = UDim2.new(1, 0, 0, 18)
-		arNote.TextColor3 = Color3.fromRGB(210, 210, 210)
+		warning.TextColor3 = Color3.fromRGB(220, 220, 220)
+		warning.Size = UDim2.new(1, 0, 0, 92)
 
 		local function makeIdRow(labelText, getFn, setFn, resetFn)
 			local row = Instance.new("Frame")
@@ -2045,51 +1872,65 @@ function App:BuildUI()
 			row.Size = UDim2.new(1, 0, 0, 44)
 			row.Parent = flyScroll
 
-			local l = UI.Text(row, labelText, 14, true)
+			local l = makeText(row, labelText, 14, true)
 			l.Size = UDim2.new(0, 120, 1, 0)
 
-			local box = UI.Input(row, "rbxassetid://... or number")
+			local box = makeInput(row, "rbxassetid://... or number")
 			box.Size = UDim2.new(1, -240, 0, 36)
 			box.Position = UDim2.new(0, 130, 0, 4)
 			box.Text = getFn()
 
-			local applyBtn = UI.Button(row, "A")
+			local applyBtn = makeButton(row, "A")
 			applyBtn.Size = UDim2.new(0, 70, 0, 36)
-			applyBtn.Position = UDim2.new(1, -100, 0, 4)
+			applyBtn.AnchorPoint = Vector2.new(1, 0)
+			applyBtn.Position = UDim2.new(1, -90, 0, 4)
 
-			local resetBtn = UI.Button(row, "R")
+			local resetBtn = makeButton(row, "R")
 			resetBtn.Size = UDim2.new(0, 70, 0, 36)
-			resetBtn.Position = UDim2.new(1, -20, 0, 4)
 			resetBtn.AnchorPoint = Vector2.new(1, 0)
+			resetBtn.Position = UDim2.new(1, -10, 0, 4)
 
-			self.Maid:Give(applyBtn.MouseButton1Click:Connect(function()
-				local ok = setFn(box.Text)
-				if not ok then
-					notify("Flight Emotes", "Invalid ID.", 3)
+			applyBtn.MouseButton1Click:Connect(function()
+				local parsed = toAssetIdString(box.Text)
+				if not parsed then
+					notify("Flight Emotes", "Invalid ID. Use rbxassetid://123 or just 123", 3)
 					return
 				end
+				setFn(parsed)
+				loadFlightTracks()
+				if flying then
+					stopFlightAnims()
+					playFloat()
+				end
+				scheduleSave()
 				notify("Flight Emotes", "Applied.", 2)
-			end))
+			end)
 
-			self.Maid:Give(resetBtn.MouseButton1Click:Connect(function()
+			resetBtn.MouseButton1Click:Connect(function()
 				resetFn()
 				box.Text = getFn()
-				notify("Flight Emotes", "Reset.", 2)
-			end))
+				loadFlightTracks()
+				if flying then
+					stopFlightAnims()
+					playFloat()
+				end
+				scheduleSave()
+				notify("Flight Emotes", "Reset to default.", 2)
+			end)
 		end
 
-		makeIdRow("FLOAT_ID:", function() return self.Flight.FloatId end, function(v) return self.Flight:SetFloatAnim(v) end, function() self.Flight:SetFloatAnim(CONFIG.Flight.Animations.DefaultFloat) end)
-		makeIdRow("FLY_ID:", function() return self.Flight.FlyId end, function(v) return self.Flight:SetFlyAnim(v) end, function() self.Flight:SetFlyAnim(CONFIG.Flight.Animations.DefaultFly) end)
+		makeIdRow("FLOAT_ID:", function() return FLOAT_ID end, function(v) FLOAT_ID = v end, function() FLOAT_ID = DEFAULT_FLOAT_ID end)
+		makeIdRow("FLY_ID:", function() return FLY_ID end, function(v) FLY_ID = v end, function() FLY_ID = DEFAULT_FLY_ID end)
 
-		local speedHdr = UI.Text(flyScroll, "Fly Speed", 16, true)
-		speedHdr.Size = UDim2.new(1, 0, 0, 22)
+		local speedHeader = makeText(flyScroll, "Fly Speed", 16, true)
+		speedHeader.Size = UDim2.new(1, 0, 0, 22)
 
 		local speedRow = Instance.new("Frame")
 		speedRow.BackgroundTransparency = 1
-		speedRow.Size = UDim2.new(1, 0, 0, 56)
+		speedRow.Size = UDim2.new(1, 0, 0, 60)
 		speedRow.Parent = flyScroll
 
-		local speedLabel = UI.Text(speedRow, "Speed: " .. tostring(CONFIG.Flight.Speed), 14, true)
+		local speedLabel = makeText(speedRow, "Speed: " .. tostring(flySpeed), 14, true)
 		speedLabel.Size = UDim2.new(1, 0, 0, 18)
 
 		local sliderBg = Instance.new("Frame")
@@ -2099,251 +1940,252 @@ function App:BuildUI()
 		sliderBg.Position = UDim2.new(0, 0, 0, 26)
 		sliderBg.Size = UDim2.new(1, 0, 0, 10)
 		sliderBg.Parent = speedRow
-		UI.Corner(sliderBg, 999)
+		makeCorner(sliderBg, 999)
 
 		local sliderFill = Instance.new("Frame")
 		sliderFill.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
 		sliderFill.BorderSizePixel = 0
 		sliderFill.Size = UDim2.new(0, 0, 1, 0)
 		sliderFill.Parent = sliderBg
-		UI.Corner(sliderFill, 999)
+		makeCorner(sliderFill, 999)
 
 		local knob = Instance.new("Frame")
 		knob.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
 		knob.BorderSizePixel = 0
 		knob.Size = UDim2.new(0, 14, 0, 14)
 		knob.Parent = sliderBg
-		UI.Corner(knob, 999)
+		makeCorner(knob, 999)
 
 		local function setSpeedFromAlpha(a)
 			a = clamp01(a)
-			local s = CONFIG.Flight.SpeedMin + (CONFIG.Flight.SpeedMax - CONFIG.Flight.SpeedMin) * a
-			self.Flight:SetSpeed(s)
-			speedLabel.Text = "Speed: " .. tostring(CONFIG.Flight.Speed)
+			local s = minFlySpeed + (maxFlySpeed - minFlySpeed) * a
+			flySpeed = math.floor(s + 0.5)
+			speedLabel.Text = "Speed: " .. tostring(flySpeed)
 			sliderFill.Size = UDim2.new(a, 0, 1, 0)
 			knob.Position = UDim2.new(a, -7, 0.5, -7)
+			scheduleSave()
 		end
 
-		setSpeedFromAlpha((CONFIG.Flight.Speed - CONFIG.Flight.SpeedMin) / (CONFIG.Flight.SpeedMax - CONFIG.Flight.SpeedMin))
+		setSpeedFromAlpha((flySpeed - minFlySpeed) / (maxFlySpeed - minFlySpeed))
 
 		local dragging = false
-		self.Maid:Give(sliderBg.InputBegan:Connect(function(i)
+		sliderBg.InputBegan:Connect(function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
 				dragging = true
 			end
-		end))
-		self.Maid:Give(sliderBg.InputEnded:Connect(function(i)
+		end)
+		sliderBg.InputEnded:Connect(function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
 				dragging = false
 			end
-		end))
-		self.Maid:Give(UserInputService.InputChanged:Connect(function(i)
+		end)
+		UserInputService.InputChanged:Connect(function(i)
 			if not dragging then return end
 			if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
 			local a = (i.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X
 			setSpeedFromAlpha(a)
-		end))
+		end)
 	end
 
+	----------------------------------------------------------------
 	-- ANIM PACKS TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(animScroll, "Anim Packs", 16, true)
+		local header = makeText(animScroll, "Anim Packs", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local help = UI.Text(animScroll, "Pick a state, then choose a pack. Custom contains your IDs.", 13, false)
+		local help = makeText(animScroll, "Pick a STATE, then pick a pack name to change only that state.", 13, false)
 		help.Size = UDim2.new(1, 0, 0, 34)
 		help.TextColor3 = Color3.fromRGB(210, 210, 210)
 
-		local stateBar = Instance.new("ScrollingFrame")
-		stateBar.BackgroundTransparency = 1
-		stateBar.BorderSizePixel = 0
-		stateBar.Size = UDim2.new(1, 0, 0, 44)
-		stateBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-		stateBar.AutomaticCanvasSize = Enum.AutomaticSize.X
-		stateBar.ScrollingDirection = Enum.ScrollingDirection.X
-		stateBar.ScrollBarThickness = 2
-		stateBar.Parent = animScroll
+		local animStateBar = Instance.new("ScrollingFrame")
+		animStateBar.BackgroundTransparency = 1
+		animStateBar.BorderSizePixel = 0
+		animStateBar.Size = UDim2.new(1, 0, 0, 44)
+		animStateBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+		animStateBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+		animStateBar.ScrollingDirection = Enum.ScrollingDirection.X
+		animStateBar.ScrollBarThickness = 2
+		animStateBar.Parent = animScroll
 
 		local stLayout = Instance.new("UIListLayout")
 		stLayout.FillDirection = Enum.FillDirection.Horizontal
 		stLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		stLayout.Padding = UDim.new(0, 12)
-		stLayout.Parent = stateBar
+		stLayout.Parent = animStateBar
 
-		local catBar = Instance.new("ScrollingFrame")
-		catBar.BackgroundTransparency = 1
-		catBar.BorderSizePixel = 0
-		catBar.Size = UDim2.new(1, 0, 0, 44)
-		catBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-		catBar.AutomaticCanvasSize = Enum.AutomaticSize.X
-		catBar.ScrollingDirection = Enum.ScrollingDirection.X
-		catBar.ScrollBarThickness = 2
-		catBar.Parent = animScroll
+		local animCategoryBar = Instance.new("ScrollingFrame")
+		animCategoryBar.BackgroundTransparency = 1
+		animCategoryBar.BorderSizePixel = 0
+		animCategoryBar.Size = UDim2.new(1, 0, 0, 44)
+		animCategoryBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+		animCategoryBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+		animCategoryBar.ScrollingDirection = Enum.ScrollingDirection.X
+		animCategoryBar.ScrollBarThickness = 2
+		animCategoryBar.Parent = animScroll
 
 		local catLayout = Instance.new("UIListLayout")
 		catLayout.FillDirection = Enum.FillDirection.Horizontal
 		catLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		catLayout.Padding = UDim.new(0, 12)
-		catLayout.Parent = catBar
+		catLayout.Parent = animCategoryBar
 
-		local listScroll = Instance.new("ScrollingFrame")
-		listScroll.BackgroundTransparency = 1
-		listScroll.BorderSizePixel = 0
-		listScroll.Size = UDim2.new(1, 0, 0, 240)
-		listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-		listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-		listScroll.ScrollBarThickness = 4
-		listScroll.Parent = animScroll
+		local animListScroll = Instance.new("ScrollingFrame")
+		animListScroll.BackgroundTransparency = 1
+		animListScroll.BorderSizePixel = 0
+		animListScroll.Size = UDim2.new(1, 0, 0, 250)
+		animListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		animListScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		animListScroll.ScrollBarThickness = 4
+		animListScroll.Parent = animScroll
 
 		local pad = Instance.new("UIPadding")
 		pad.PaddingTop = UDim.new(0, 6)
 		pad.PaddingBottom = UDim.new(0, 6)
 		pad.PaddingLeft = UDim.new(0, 2)
 		pad.PaddingRight = UDim.new(0, 2)
-		pad.Parent = listScroll
+		pad.Parent = animListScroll
 
-		local container = Instance.new("Frame")
-		container.BackgroundTransparency = 1
-		container.Size = UDim2.new(1, 0, 0, 0)
-		container.Parent = listScroll
+		local animListContainer = Instance.new("Frame")
+		animListContainer.BackgroundTransparency = 1
+		animListContainer.Size = UDim2.new(1, 0, 0, 0)
+		animListContainer.Parent = animListScroll
 
-		local lay = Instance.new("UIListLayout")
-		lay.SortOrder = Enum.SortOrder.LayoutOrder
-		lay.Padding = UDim.new(0, 10)
-		lay.Parent = container
+		local listLayout = Instance.new("UIListLayout")
+		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		listLayout.Padding = UDim.new(0, 10)
+		listLayout.Parent = animListContainer
 
-		local chosenState = "Idle"
-		local chosenCat = "Unreleased"
-		local stateBtns = {}
-		local catBtns = {}
+		local function animateListPop()
+			animListContainer.Position = UDim2.new(0, 26, 0, 0)
+			tween(animListContainer, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Position = UDim2.new(0, 0, 0, 0)
+			})
+		end
 
-		local function clearList()
-			for _, ch in ipairs(container:GetChildren()) do
+		local stateButtons = {}
+		local categoryButtons = {}
+
+		local function rebuildPackList()
+			for _, ch in ipairs(animListContainer:GetChildren()) do
 				if ch:IsA("TextButton") or ch:IsA("TextLabel") or ch:IsA("Frame") then
 					ch:Destroy()
 				end
 			end
-		end
 
-		local function applyAnimIdForState(stateName, idNumOrStr, isCustomCategory)
-			local char = LocalPlayer.Character
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			if not char or not hum then
-				notify("Anim Packs", "Character not ready.", 2)
-				return
-			end
-
-			local idStr = toAssetIdString(idNumOrStr)
-			if not idStr then
-				notify("Anim Packs", "Invalid ID.", 2)
-				return
-			end
-
-			StateOverrides[stateName] = idStr
-			local ok, err = applyStateOverride(char, hum, stateName, idStr)
-			if ok then
-				if isCustomCategory then
-					self:_applyCustomWalkSpeedRule(hum, stateName)
-				end
-				notify("Anim Packs", "Set " .. stateName .. " OK.", 2)
-			else
-				notify("Anim Packs", err or "Failed.", 3)
-			end
-		end
-
-		local function rebuild()
-			clearList()
-
-			if chosenCat == "Custom" then
-				local list = CustomAnims[chosenState]
-				if not list or #list == 0 then
-					local t = UI.Text(container, "No Custom entries for: " .. chosenState, 14, true)
+			if lastChosenCategory == "Custom" then
+				local names = listCustomNamesForState(lastChosenState)
+				if #names == 0 then
+					local t = makeText(animListContainer, "No Custom animations for: " .. lastChosenState, 14, true)
 					t.Size = UDim2.new(1, 0, 0, 28)
+					animateListPop()
 					return
 				end
 
-				for _, entry in ipairs(list) do
-					local b = UI.Button(container, entry.Name)
+				for _, nm in ipairs(names) do
+					local b = makeButton(animListContainer, nm)
 					b.Size = UDim2.new(1, 0, 0, 36)
-					self.Maid:Give(b.MouseButton1Click:Connect(function()
-						applyAnimIdForState(chosenState, entry.Id, true)
-					end))
+					b.MouseButton1Click:Connect(function()
+						local id = getCustomIdForState(nm, lastChosenState)
+						if not id then return end
+						stateOverrides[lastChosenState] = "rbxassetid://" .. tostring(id)
+						local ok = applyStateOverrideToAnimate(lastChosenState, stateOverrides[lastChosenState])
+						if ok then
+							notify("Anim Packs", "Set " .. lastChosenState .. " to " .. nm, 2)
+							scheduleSave()
+						else
+							notify("Anim Packs", "Failed to apply. (Animate script missing?)", 3)
+						end
+					end)
 				end
+
+				animateListPop()
 				return
 			end
 
-			local names = listPackNames(chosenCat == "Unreleased" and "Unreleased" or "Roblox Anims")
+			local names = listPackNamesForCategory(lastChosenCategory)
 			for _, packName in ipairs(names) do
-				local b = UI.Button(container, packName)
+				local b = makeButton(animListContainer, packName)
 				b.Size = UDim2.new(1, 0, 0, 36)
-				self.Maid:Give(b.MouseButton1Click:Connect(function()
-					local id = getPackIdForState(packName, chosenState)
+				b.MouseButton1Click:Connect(function()
+					local id = getPackValueForState(packName, lastChosenState)
 					if not id then
-						notify("Anim Packs", "No ID for: " .. chosenState, 2)
+						notify("Anim Packs", "That pack has no ID for: " .. lastChosenState, 2)
 						return
 					end
-					applyAnimIdForState(chosenState, id, false)
-				end))
+					stateOverrides[lastChosenState] = "rbxassetid://" .. tostring(id)
+					local ok = applyStateOverrideToAnimate(lastChosenState, stateOverrides[lastChosenState])
+					if ok then
+						notify("Anim Packs", "Set " .. lastChosenState .. " to " .. packName, 2)
+						scheduleSave()
+					else
+						notify("Anim Packs", "Failed to apply. (Animate script missing?)", 3)
+					end
+				end)
 			end
+
+			animateListPop()
 		end
 
-		local function setState(s)
-			chosenState = s
-			for name, btn in pairs(stateBtns) do
-				setTabActive(btn, name == s)
+		local function setState(stateName)
+			lastChosenState = stateName
+			for n, btn in pairs(stateButtons) do
+				setTabButtonActive(btn, n == stateName)
 			end
-			rebuild()
+			rebuildPackList()
+			scheduleSave()
 		end
 
-		local function setCategory(c)
-			chosenCat = c
-			for name, btn in pairs(catBtns) do
-				setTabActive(btn, name == c)
+		local function setCategory(catName)
+			lastChosenCategory = catName
+			for n, btn in pairs(categoryButtons) do
+				setTabButtonActive(btn, n == catName)
 			end
-			rebuild()
+			rebuildPackList()
+			scheduleSave()
 		end
 
-		for _, s in ipairs({ "Idle","Walk","Run","Jump","Climb","Fall","Swim" }) do
-			local b = UI.Button(stateBar, s)
+		local states = { "Idle", "Walk", "Run", "Jump", "Climb", "Fall", "Swim" }
+		for _, sName in ipairs(states) do
+			local b = makeButton(animStateBar, sName)
 			b.Size = UDim2.new(0, 110, 0, 36)
-			stateBtns[s] = b
-			self.Maid:Give(b.MouseButton1Click:Connect(function() setState(s) end))
+			stateButtons[sName] = b
+			b.MouseButton1Click:Connect(function()
+				setState(sName)
+			end)
 		end
 
-		for _, c in ipairs({ "Roblox Anims","Unreleased","Custom" }) do
-			local b = UI.Button(catBar, c)
-			b.Size = UDim2.new(0, (c == "Roblox Anims" and 160 or 130), 0, 36)
-			catBtns[c] = b
-			self.Maid:Give(b.MouseButton1Click:Connect(function() setCategory(c) end))
+		local cats = { "Roblox Anims", "Unreleased", "Custom" }
+		for _, cName in ipairs(cats) do
+			local b = makeButton(animCategoryBar, cName)
+			b.Size = UDim2.new(0, (cName == "Roblox Anims" and 160 or 130), 0, 36)
+			categoryButtons[cName] = b
+			b.MouseButton1Click:Connect(function()
+				setCategory(cName)
+			end)
 		end
 
-		setCategory(chosenCat)
-		setState(chosenState)
+		setCategory(lastChosenCategory)
+		setState(lastChosenState)
 	end
 
+	----------------------------------------------------------------
 	-- PLAYER TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(playerScroll, "Player", 16, true)
+		local header = makeText(playerScroll, "Player", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local hint = UI.Text(playerScroll, "Player settings.", 13, false)
-		hint.Size = UDim2.new(1, 0, 0, 22)
-		hint.TextColor3 = Color3.fromRGB(210, 210, 210)
+		local info = makeText(playerScroll, "WalkSpeed changer. Reset uses the game's default speed for you.", 13, false)
+		info.Size = UDim2.new(1, 0, 0, 34)
+		info.TextColor3 = Color3.fromRGB(210, 210, 210)
 
-		local cur = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-		local currentSpeed = cur and cur.WalkSpeed or (self.PlayerSpeed or 16)
-		currentSpeed = math.clamp(currentSpeed, CONFIG.Player.SpeedMin, CONFIG.Player.SpeedMax)
-		self.PlayerSpeed = math.floor(currentSpeed + 0.5)
+		local row = Instance.new("Frame")
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, 76)
+		row.Parent = playerScroll
 
-		local speedHdr = UI.Text(playerScroll, "WalkSpeed", 16, true)
-		speedHdr.Size = UDim2.new(1, 0, 0, 22)
-
-		local speedRow = Instance.new("Frame")
-		speedRow.BackgroundTransparency = 1
-		speedRow.Size = UDim2.new(1, 0, 0, 56)
-		speedRow.Parent = playerScroll
-
-		local speedLabel = UI.Text(speedRow, "Speed: " .. tostring(self.PlayerSpeed), 14, true)
+		local speedLabel = makeText(row, "Speed: " .. tostring(playerSpeed or 16), 14, true)
 		speedLabel.Size = UDim2.new(1, 0, 0, 18)
 
 		local sliderBg = Instance.new("Frame")
@@ -2352,339 +2194,375 @@ function App:BuildUI()
 		sliderBg.BorderSizePixel = 0
 		sliderBg.Position = UDim2.new(0, 0, 0, 26)
 		sliderBg.Size = UDim2.new(1, 0, 0, 10)
-		sliderBg.Parent = speedRow
-		UI.Corner(sliderBg, 999)
+		sliderBg.Parent = row
+		makeCorner(sliderBg, 999)
 
 		local sliderFill = Instance.new("Frame")
 		sliderFill.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
 		sliderFill.BorderSizePixel = 0
 		sliderFill.Size = UDim2.new(0, 0, 1, 0)
 		sliderFill.Parent = sliderBg
-		UI.Corner(sliderFill, 999)
+		makeCorner(sliderFill, 999)
 
 		local knob = Instance.new("Frame")
 		knob.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
 		knob.BorderSizePixel = 0
 		knob.Size = UDim2.new(0, 14, 0, 14)
 		knob.Parent = sliderBg
-		UI.Corner(knob, 999)
+		makeCorner(knob, 999)
 
-		local function setPlayerSpeedFromAlpha(a)
+		local resetBtn = makeButton(row, "Reset")
+		resetBtn.Size = UDim2.new(0, 100, 0, 34)
+		resetBtn.AnchorPoint = Vector2.new(1, 0)
+		resetBtn.Position = UDim2.new(1, 0, 0, 42)
+
+		local function setSpeedFromAlpha(a)
 			a = clamp01(a)
-			local s = CONFIG.Player.SpeedMin + (CONFIG.Player.SpeedMax - CONFIG.Player.SpeedMin) * a
-			self:SetPlayerSpeed(s)
-			speedLabel.Text = "Speed: " .. tostring(self.PlayerSpeed or s)
+			local s = 2 + (500 - 2) * a
+			playerSpeed = math.floor(s + 0.5)
+			speedLabel.Text = "Speed: " .. tostring(playerSpeed)
 			sliderFill.Size = UDim2.new(a, 0, 1, 0)
 			knob.Position = UDim2.new(a, -7, 0.5, -7)
+			applyPlayerSpeed()
+			scheduleSave()
 		end
 
-		local alpha = (self.PlayerSpeed - CONFIG.Player.SpeedMin) / (CONFIG.Player.SpeedMax - CONFIG.Player.SpeedMin)
-		setPlayerSpeedFromAlpha(alpha)
+		local function alphaFromSpeed(s)
+			s = math.clamp(s, 2, 500)
+			return (s - 2) / (500 - 2)
+		end
+
+		setSpeedFromAlpha(alphaFromSpeed(playerSpeed or 16))
 
 		local dragging = false
-		self.Maid:Give(sliderBg.InputBegan:Connect(function(i)
+		sliderBg.InputBegan:Connect(function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
 				dragging = true
 			end
-		end))
-		self.Maid:Give(sliderBg.InputEnded:Connect(function(i)
+		end)
+		sliderBg.InputEnded:Connect(function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
 				dragging = false
 			end
-		end))
-		self.Maid:Give(UserInputService.InputChanged:Connect(function(i)
+		end)
+		UserInputService.InputChanged:Connect(function(i)
 			if not dragging then return end
 			if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
-			local a2 = (i.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X
-			setPlayerSpeedFromAlpha(a2)
-		end))
+			local a = (i.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X
+			setSpeedFromAlpha(a)
+		end)
+
+		resetBtn.MouseButton1Click:Connect(function()
+			resetPlayerSpeedToDefault()
+			setSpeedFromAlpha(alphaFromSpeed(playerSpeed or 16))
+			notify("Player", "Speed reset.", 2)
+		end)
 	end
 
-	-- CAMERA TAB (mouse/cursor part removed)
+	----------------------------------------------------------------
+	-- CAMERA TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(camScroll, "Camera", 16, true)
+		local header = makeText(cameraScroll, "Camera", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local hint = UI.Text(camScroll,
-			"Attach camera to different parts and adjust offset.",
-			13, false
-		)
-		hint.Size = UDim2.new(1, 0, 0, 34)
-		hint.TextColor3 = Color3.fromRGB(210, 210, 210)
+		local sub = makeText(cameraScroll, "Choose camera subject, offset, max zoom, and FOV. Each has a reset.", 13, false)
+		sub.Size = UDim2.new(1, 0, 0, 34)
+		sub.TextColor3 = Color3.fromRGB(210, 210, 210)
 
-		local attachHdr = UI.Text(camScroll, "Attach To", 16, true)
-		attachHdr.Size = UDim2.new(1, 0, 0, 22)
+		local subjectHeader = makeText(cameraScroll, "Attach To", 15, true)
+		subjectHeader.Size = UDim2.new(1, 0, 0, 20)
 
-		local attachBar = Instance.new("ScrollingFrame")
-		attachBar.BackgroundTransparency = 1
-		attachBar.BorderSizePixel = 0
-		attachBar.Size = UDim2.new(1, 0, 0, 46)
-		attachBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-		attachBar.AutomaticCanvasSize = Enum.AutomaticSize.X
-		attachBar.ScrollingDirection = Enum.ScrollingDirection.X
-		attachBar.ScrollBarThickness = 2
-		attachBar.Parent = camScroll
+		local subjectBar = Instance.new("ScrollingFrame")
+		subjectBar.BackgroundTransparency = 1
+		subjectBar.BorderSizePixel = 0
+		subjectBar.Size = UDim2.new(1, 0, 0, 44)
+		subjectBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+		subjectBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+		subjectBar.ScrollingDirection = Enum.ScrollingDirection.X
+		subjectBar.ScrollBarThickness = 2
+		subjectBar.Parent = cameraScroll
 
-		local attachLay = Instance.new("UIListLayout")
-		attachLay.FillDirection = Enum.FillDirection.Horizontal
-		attachLay.SortOrder = Enum.SortOrder.LayoutOrder
-		attachLay.Padding = UDim.new(0, 10)
-		attachLay.Parent = attachBar
+		local subjLayout = Instance.new("UIListLayout")
+		subjLayout.FillDirection = Enum.FillDirection.Horizontal
+		subjLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		subjLayout.Padding = UDim.new(0, 10)
+		subjLayout.Parent = subjectBar
 
-		local attachButtons = {}
-		local attachOptions = {
-			{ Name = "Humanoid", Target = "Humanoid" },
-			{ Name = "Head", Target = "Head" },
-			{ Name = "Root", Target = "HumanoidRootPart" },
-			{ Name = "UpperTorso", Target = "UpperTorso" },
-			{ Name = "LowerTorso", Target = "LowerTorso" },
-			{ Name = "LeftHand", Target = "LeftHand" },
-			{ Name = "RightHand", Target = "RightHand" },
-		}
+		local subjButtons = {}
+		local modes = { "Humanoid", "Head", "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso" }
 
-		local function refreshAttachButtons()
-			for _, info in ipairs(attachOptions) do
-				local b = attachButtons[info.Target]
-				if b then
-					setTabActive(b, self.CameraAttachChoice == info.Target)
+		local function setSubjectMode(m)
+			camSubjectMode = m
+			for k, b in pairs(subjButtons) do
+				setTabButtonActive(b, k == m)
+			end
+			applyCameraSettings()
+			scheduleSave()
+		end
+
+		for _, m in ipairs(modes) do
+			local b = makeButton(subjectBar, m)
+			b.Size = UDim2.new(0, 170, 0, 36)
+			subjButtons[m] = b
+			b.MouseButton1Click:Connect(function()
+				setSubjectMode(m)
+			end)
+		end
+
+		local offHeader = makeText(cameraScroll, "Offset", 15, true)
+		offHeader.Size = UDim2.new(1, 0, 0, 20)
+
+		local function makeAxisSlider(axisName, getValFn, setValFn, minV, maxV)
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 66)
+			row.Parent = cameraScroll
+
+			local label = makeText(row, axisName .. ": " .. string.format("%.2f", getValFn()), 14, true)
+			label.Size = UDim2.new(1, -120, 0, 18)
+
+			local reset = makeButton(row, "Reset")
+			reset.Size = UDim2.new(0, 100, 0, 30)
+			reset.AnchorPoint = Vector2.new(1, 0)
+			reset.Position = UDim2.new(1, 0, 0, 0)
+
+			local sliderBg = Instance.new("Frame")
+			sliderBg.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+			sliderBg.BackgroundTransparency = 0.15
+			sliderBg.BorderSizePixel = 0
+			sliderBg.Position = UDim2.new(0, 0, 0, 26)
+			sliderBg.Size = UDim2.new(1, 0, 0, 10)
+			sliderBg.Parent = row
+			makeCorner(sliderBg, 999)
+
+			local fill = Instance.new("Frame")
+			fill.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+			fill.BorderSizePixel = 0
+			fill.Size = UDim2.new(0, 0, 1, 0)
+			fill.Parent = sliderBg
+			makeCorner(fill, 999)
+
+			local knob = Instance.new("Frame")
+			knob.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
+			knob.BorderSizePixel = 0
+			knob.Size = UDim2.new(0, 14, 0, 14)
+			knob.Parent = sliderBg
+			makeCorner(knob, 999)
+
+			local function setFromAlpha(a)
+				a = clamp01(a)
+				local v = minV + (maxV - minV) * a
+				setValFn(v)
+				label.Text = axisName .. ": " .. string.format("%.2f", getValFn())
+				fill.Size = UDim2.new(a, 0, 1, 0)
+				knob.Position = UDim2.new(a, -7, 0.5, -7)
+				applyCameraSettings()
+				scheduleSave()
+			end
+
+			local function alphaFromValue(v)
+				v = math.clamp(v, minV, maxV)
+				return (v - minV) / (maxV - minV)
+			end
+
+			setFromAlpha(alphaFromValue(getValFn()))
+
+			local dragging = false
+			sliderBg.InputBegan:Connect(function(i)
+				if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+					dragging = true
 				end
-			end
+			end)
+			sliderBg.InputEnded:Connect(function(i)
+				if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+					dragging = false
+				end
+			end)
+			UserInputService.InputChanged:Connect(function(i)
+				if not dragging then return end
+				if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
+				local a = (i.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X
+				setFromAlpha(a)
+			end)
+
+			reset.MouseButton1Click:Connect(function()
+				if axisName == "X" then camOffset = Vector3.new(0, camOffset.Y, camOffset.Z) end
+				if axisName == "Y" then camOffset = Vector3.new(camOffset.X, 0, camOffset.Z) end
+				if axisName == "Z" then camOffset = Vector3.new(camOffset.X, camOffset.Y, 0) end
+				setFromAlpha(alphaFromValue(getValFn()))
+				notify("Camera", "Reset " .. axisName .. ".", 2)
+			end)
 		end
 
-		for _, info in ipairs(attachOptions) do
-			local b = UI.Button(attachBar, info.Name)
-			b.Size = UDim2.new(0, 140, 0, 38)
-			attachButtons[info.Target] = b
-			self.Maid:Give(b.MouseButton1Click:Connect(function()
-				self:SetCameraAttach(info.Target)
-				refreshAttachButtons()
-				notify("Camera", "Attached to: " .. info.Name, 2)
-			end))
-		end
+		makeAxisSlider("X", function() return camOffset.X end, function(v) camOffset = Vector3.new(v, camOffset.Y, camOffset.Z) end, -10, 10)
+		makeAxisSlider("Y", function() return camOffset.Y end, function(v) camOffset = Vector3.new(camOffset.X, v, camOffset.Z) end, -10, 10)
+		makeAxisSlider("Z", function() return camOffset.Z end, function(v) camOffset = Vector3.new(camOffset.X, camOffset.Y, v) end, -10, 10)
 
-		local customRow = Instance.new("Frame")
-		customRow.BackgroundTransparency = 1
-		customRow.Size = UDim2.new(1, 0, 0, 44)
-		customRow.Parent = camScroll
+		local resetAll = makeButton(cameraScroll, "Reset Camera (All)")
+		resetAll.Size = UDim2.new(0, 220, 0, 36)
+		resetAll.MouseButton1Click:Connect(function()
+			resetCameraToDefaults()
+			notify("Camera", "Camera reset.", 2)
+		end)
 
-		local customLbl = UI.Text(customRow, "Custom Part:", 14, true)
-		customLbl.Size = UDim2.new(0, 120, 1, 0)
-
-		local customBox = UI.Input(customRow, "Type part name (e.g. Torso)")
-		customBox.Size = UDim2.new(1, -240, 0, 36)
-		customBox.Position = UDim2.new(0, 130, 0, 4)
-
-		local customApply = UI.Button(customRow, "Apply")
-		customApply.Size = UDim2.new(0, 90, 0, 36)
-		customApply.Position = UDim2.new(1, -100, 0, 4)
-
-		local customReset = UI.Button(customRow, "Reset")
-		customReset.Size = UDim2.new(0, 90, 0, 36)
-		customReset.Position = UDim2.new(1, -10, 0, 4)
-		customReset.AnchorPoint = Vector2.new(1, 0)
-
-		self.Maid:Give(customApply.MouseButton1Click:Connect(function()
-			local name = tostring(customBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-			if name == "" then
-				notify("Camera", "Enter a part name first.", 2)
-				return
-			end
-			self:SetCameraAttach(name)
-			refreshAttachButtons()
-			notify("Camera", "Trying: " .. name, 2)
-		end))
-
-		self.Maid:Give(customReset.MouseButton1Click:Connect(function()
-			customBox.Text = ""
-			self:SetCameraAttach("Humanoid")
-			refreshAttachButtons()
-			notify("Camera", "Reset attach to Humanoid.", 2)
-		end))
-
-		refreshAttachButtons()
-
-		local offsetHdr = UI.Text(camScroll, "Offset", 16, true)
-		offsetHdr.Size = UDim2.new(1, 0, 0, 22)
-
-		local offNote = UI.Text(camScroll, "Left/Right = X, Up/Down = Y (optional Forward/Back = Z).", 13, false)
-		offNote.Size = UDim2.new(1, 0, 0, 22)
-		offNote.TextColor3 = Color3.fromRGB(210, 210, 210)
-
-		self:_makeSlider(camScroll, "X (Left/Right)", -6, 6,
-			function() return self.CameraOffset.X end,
-			function(v) self:SetCameraOffset(v, nil, nil) end
-		)
-		self:_makeSlider(camScroll, "Y (Up/Down)", -6, 6,
-			function() return self.CameraOffset.Y end,
-			function(v) self:SetCameraOffset(nil, v, nil) end
-		)
-		self:_makeSlider(camScroll, "Z (Forward/Back)", -6, 6,
-			function() return self.CameraOffset.Z end,
-			function(v) self:SetCameraOffset(nil, nil, v) end
-		)
-
-		local resetOffset = UI.Button(camScroll, "Reset Offset")
-		resetOffset.Size = UDim2.new(1, 0, 0, 38)
-		self.Maid:Give(resetOffset.MouseButton1Click:Connect(function()
-			self.CameraOffset = Vector3.new(0, 0, 0)
-			self:ApplyCameraSettings()
-			notify("Camera", "Offset reset.", 2)
-		end))
+		setSubjectMode(camSubjectMode)
+		applyCameraSettings()
 	end
 
+	----------------------------------------------------------------
 	-- LIGHTING TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(lightScroll, "Lighting", 16, true)
+		local header = makeText(lightingScroll, "Lighting", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local hint = UI.Text(lightScroll, "Sky presets + toggleable effects (no duplication).", 13, false)
-		hint.Size = UDim2.new(1, 0, 0, 28)
-		hint.TextColor3 = Color3.fromRGB(210, 210, 210)
+		readLightingSaveState()
 
-		local bar = Instance.new("Frame")
-		bar.BackgroundTransparency = 1
-		bar.Size = UDim2.new(1, 0, 0, 44)
-		bar.Parent = lightScroll
+		local topRow = Instance.new("Frame")
+		topRow.BackgroundTransparency = 1
+		topRow.Size = UDim2.new(1, 0, 0, 44)
+		topRow.Parent = lightingScroll
 
-		local barLay = Instance.new("UIListLayout")
-		barLay.FillDirection = Enum.FillDirection.Horizontal
-		barLay.Padding = UDim.new(0, 10)
-		barLay.VerticalAlignment = Enum.VerticalAlignment.Center
-		barLay.Parent = bar
+		local topLay = Instance.new("UIListLayout")
+		topLay.FillDirection = Enum.FillDirection.Horizontal
+		topLay.Padding = UDim.new(0, 10)
+		topLay.Parent = topRow
 
-		local skyBtn = UI.Button(bar, "Sky")
-		skyBtn.Size = UDim2.new(0, 120, 0, 36)
+		local enableBtn = makeButton(topRow, LightingState.Enabled and "Enabled" or "Disabled")
+		enableBtn.Size = UDim2.new(0, 140, 0, 36)
 
-		local effBtn = UI.Button(bar, "Effects")
-		effBtn.Size = UDim2.new(0, 120, 0, 36)
+		local resetBtn = makeButton(topRow, "Reset Lighting")
+		resetBtn.Size = UDim2.new(0, 160, 0, 36)
 
-		local resetBtn = UI.Button(bar, "Reset")
-		resetBtn.Size = UDim2.new(0, 120, 0, 36)
+		enableBtn.MouseButton1Click:Connect(function()
+			LightingState.Enabled = not LightingState.Enabled
+			enableBtn.Text = LightingState.Enabled and "Enabled" or "Disabled"
+			writeLightingSaveState()
+			syncLightingToggles()
+		end)
 
-		local skyPanel = Instance.new("Frame")
-		skyPanel.BackgroundTransparency = 1
-		skyPanel.Size = UDim2.new(1, 0, 0, 0)
-		skyPanel.AutomaticSize = Enum.AutomaticSize.Y
-		skyPanel.Parent = lightScroll
+		resetBtn.MouseButton1Click:Connect(function()
+			resetLightingToOriginal()
+			notify("Lighting", "Reset.", 2)
+		end)
 
-		local skyLay = Instance.new("UIListLayout")
-		skyLay.SortOrder = Enum.SortOrder.LayoutOrder
-		skyLay.Padding = UDim.new(0, 10)
-		skyLay.Parent = skyPanel
+		local skyHeader = makeText(lightingScroll, "Sky Presets", 15, true)
+		skyHeader.Size = UDim2.new(1, 0, 0, 20)
 
-		local effPanel = Instance.new("Frame")
-		effPanel.BackgroundTransparency = 1
-		effPanel.Size = UDim2.new(1, 0, 0, 0)
-		effPanel.AutomaticSize = Enum.AutomaticSize.Y
-		effPanel.Visible = false
-		effPanel.Parent = lightScroll
+		local skyBar = Instance.new("ScrollingFrame")
+		skyBar.BackgroundTransparency = 1
+		skyBar.BorderSizePixel = 0
+		skyBar.Size = UDim2.new(1, 0, 0, 44)
+		skyBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+		skyBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+		skyBar.ScrollingDirection = Enum.ScrollingDirection.X
+		skyBar.ScrollBarThickness = 2
+		skyBar.Parent = lightingScroll
 
-		local effLay = Instance.new("UIListLayout")
-		effLay.SortOrder = Enum.SortOrder.LayoutOrder
-		effLay.Padding = UDim.new(0, 10)
-		effLay.Parent = effPanel
+		local skyLayout = Instance.new("UIListLayout")
+		skyLayout.FillDirection = Enum.FillDirection.Horizontal
+		skyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		skyLayout.Padding = UDim.new(0, 10)
+		skyLayout.Parent = skyBar
 
-		local presetLabel = UI.Text(skyPanel, "Current: " .. self.Lighting.ActivePreset, 13, true)
-		presetLabel.Size = UDim2.new(1, 0, 0, 18)
-		presetLabel.TextColor3 = Color3.fromRGB(210, 210, 210)
+		local skyButtons = {}
 
-		local function show(which)
-			local skyOn = (which == "Sky")
-			skyPanel.Visible = skyOn
-			effPanel.Visible = not skyOn
-			setTabActive(skyBtn, skyOn)
-			setTabActive(effBtn, not skyOn)
+		local function setSkyActive(name)
+			for k, b in pairs(skyButtons) do
+				setTabButtonActive(b, k == name)
+			end
 		end
 
-		local function addPresetBtn(name)
-			local b = UI.Button(skyPanel, name)
-			b.Size = UDim2.new(1, 0, 0, 36)
-			self.Maid:Give(b.MouseButton1Click:Connect(function()
-				if self.Lighting:SetPreset(name) then
-					presetLabel.Text = "Current: " .. self.Lighting.ActivePreset
-					notify("Lighting", "Preset: " .. name, 2)
-				end
-			end))
+		for name, _ in pairs(SKY_PRESETS) do
+			local b = makeButton(skyBar, name)
+			b.Size = UDim2.new(0, 190, 0, 36)
+			skyButtons[name] = b
+			b.MouseButton1Click:Connect(function()
+				setSkyActive(name)
+				applySkyPreset(name)
+				notify("Lighting", "Applied: " .. name, 2)
+			end)
 		end
 
-		addPresetBtn("Red Galaxy")
-		addPresetBtn("Deep Galaxy")
-		addPresetBtn("Anime Clouds")
-		addPresetBtn("Vibrant Clouds")
-		addPresetBtn("Blocky Sky")
+		local fxHeader = makeText(lightingScroll, "Effects", 15, true)
+		fxHeader.Size = UDim2.new(1, 0, 0, 20)
 
-		local function makeToggle(label, effectKey, effectInstName)
-			local line = Instance.new("Frame")
-			line.BackgroundTransparency = 1
-			line.Size = UDim2.new(1, 0, 0, 44)
-			line.Parent = effPanel
+		local function makeToggle(nameKey, labelText)
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 40)
+			row.Parent = lightingScroll
 
-			local l = UI.Text(line, label, 14, true)
-			l.Size = UDim2.new(0, 220, 1, 0)
-
-			local btn = UI.Button(line, "OFF")
-			btn.Size = UDim2.new(0, 110, 0, 34)
-			btn.Position = UDim2.new(1, -110, 0.5, -17)
-			btn.AnchorPoint = Vector2.new(1, 0)
+			local btn = makeButton(row, "")
+			btn.Size = UDim2.new(0, 220, 0, 36)
+			btn.Position = UDim2.new(0, 0, 0, 2)
 
 			local function refresh()
-				local on = self.Lighting:IsEffectOn(effectInstName)
-				btn.Text = on and "ON" or "OFF"
-				setTabActive(btn, on)
+				btn.Text = (LightingState.Toggles[nameKey] and "ON: " or "OFF: ") .. labelText
+				setTabButtonActive(btn, LightingState.Toggles[nameKey])
 			end
 
-			self.Maid:Give(btn.MouseButton1Click:Connect(function()
-				local on = self.Lighting:IsEffectOn(effectInstName)
-				self.Lighting:ToggleEffect(effectKey, not on)
+			btn.MouseButton1Click:Connect(function()
+				LightingState.Toggles[nameKey] = not LightingState.Toggles[nameKey]
+				writeLightingSaveState()
+				syncLightingToggles()
 				refresh()
-			end))
+			end)
 
 			refresh()
 		end
 
-		makeToggle("Bloom", "Bloom", "SOS_Bloom")
-		makeToggle("Color Correction", "ColorCorrection", "SOS_ColorCorrection")
-		makeToggle("Atmosphere", "Atmosphere", "SOS_Atmosphere")
-		makeToggle("Sun Rays", "SunRays", "SOS_SunRays")
-		makeToggle("Depth Of Field", "DepthOfField", "SOS_DepthOfField")
-		makeToggle("Motion Blur", "MotionBlur", "SOS_MotionBlur")
+		makeToggle("Sky", "Sky")
+		makeToggle("Atmosphere", "Atmosphere")
+		makeToggle("ColorCorrection", "Color Correction")
+		makeToggle("Bloom", "Bloom")
+		makeToggle("DepthOfField", "Depth Of Field")
+		makeToggle("MotionBlur", "Motion Blur")
+		makeToggle("SunRays", "Sun Rays")
 
-		self.Maid:Give(skyBtn.MouseButton1Click:Connect(function() show("Sky") end))
-		self.Maid:Give(effBtn.MouseButton1Click:Connect(function() show("Effects") end))
-		self.Maid:Give(resetBtn.MouseButton1Click:Connect(function()
-			self.Lighting:Reset()
-			presetLabel.Text = "Current: " .. self.Lighting.ActivePreset
-			notify("Lighting", "Reset done.", 2)
-		end))
-
-		show("Sky")
+		if LightingState.SelectedSky and SKY_PRESETS[LightingState.SelectedSky] then
+			setSkyActive(LightingState.SelectedSky)
+			if LightingState.Enabled then
+				applySkyPreset(LightingState.SelectedSky)
+			end
+		end
 	end
 
+	----------------------------------------------------------------
 	-- MIC UP TAB
+	----------------------------------------------------------------
 	if micupScroll then
-		local header = UI.Text(micupScroll, "Mic up", 16, true)
+		local header = makeText(micupScroll, "Mic up", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local msg = UI.Text(micupScroll,
-			"VIP utility.\nIf you own VIP, you can claim the Better Speed Coil.",
+		local msg = makeText(micupScroll,
+			"For those of you who play this game hopefully your not a P£D0 also dont be weird and enjoy this tab\n(Some Stuff Will Be Added Soon)",
 			14, false
 		)
-		msg.Size = UDim2.new(1, 0, 0, 80)
+		msg.Size = UDim2.new(1, 0, 0, 120)
 
-		local coilBtn = UI.Button(micupScroll, "Get Better Speed Coil")
-		coilBtn.Size = UDim2.new(1, 0, 0, 40)
-		self.Maid:Give(coilBtn.MouseButton1Click:Connect(function()
-			giveBetterSpeedCoil()
-		end))
+		local coilBtn = makeButton(micupScroll, "Better Speed Coil")
+		coilBtn.Size = UDim2.new(0, 220, 0, 40)
+
+		coilBtn.MouseButton1Click:Connect(function()
+			if ownsAnyVipPass() then
+				giveBetterSpeedCoil()
+			else
+				notify("VIP Required", "You need VIP First.", 3)
+			end
+		end)
 	end
 
+	----------------------------------------------------------------
 	-- SERVER TAB
+	----------------------------------------------------------------
 	do
-		local header = UI.Text(serverScroll, "Server", 16, true)
+		local header = makeText(serverScroll, "Server", 16, true)
 		header.Size = UDim2.new(1, 0, 0, 22)
 
-		local controls = UI.Text(serverScroll, "Rejoin same server or hop (best-effort highest players).", 14, false)
-		controls.Size = UDim2.new(1, 0, 0, 40)
+		local controls = makeText(serverScroll, "Controls\n- Rejoin: same server\n- Server Hop: best-effort (highest players).", 14, false)
+		controls.Size = UDim2.new(1, 0, 0, 56)
 
 		local row = Instance.new("Frame")
 		row.BackgroundTransparency = 1
@@ -2696,26 +2574,26 @@ function App:BuildUI()
 		lay.Padding = UDim.new(0, 10)
 		lay.Parent = row
 
-		local rejoinBtn = UI.Button(row, "Rejoin")
-		rejoinBtn.Size = UDim2.new(0, 220, 0, 36)
+		local rejoinBtn = makeButton(row, "Rejoin (Same Server)")
+		rejoinBtn.Size = UDim2.new(0, 230, 0, 36)
 
-		local hopBtn = UI.Button(row, "Server Hop")
+		local hopBtn = makeButton(row, "Server Hop")
 		hopBtn.Size = UDim2.new(0, 140, 0, 36)
 
-		self.Maid:Give(rejoinBtn.MouseButton1Click:Connect(function()
-			notify("Server", "Rejoining...", 2)
+		rejoinBtn.MouseButton1Click:Connect(function()
+			notify("Server", "Rejoining same server...", 2)
 			pcall(function()
 				TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
 			end)
-		end))
+		end)
 
-		self.Maid:Give(hopBtn.MouseButton1Click:Connect(function()
+		hopBtn.MouseButton1Click:Connect(function()
 			notify("Server", "Searching servers...", 2)
 
 			task.spawn(function()
 				local placeId = game.PlaceId
 				local cursor = ""
-				local best
+				local best = nil
 
 				for _ = 1, 3 do
 					local url = "https://games.roblox.com/v1/games/" .. tostring(placeId) .. "/servers/Public?sortOrder=Desc&limit=100"
@@ -2728,8 +2606,10 @@ function App:BuildUI()
 					end)
 
 					if not ok then
-						notify("Server Hop", "HTTP failed (HttpEnabled off?)", 4)
-						pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
+						notify("Server Hop", "HTTP failed. (HttpEnabled might be off)", 4)
+						pcall(function()
+							TeleportService:Teleport(placeId, LocalPlayer)
+						end)
 						return
 					end
 
@@ -2752,163 +2632,327 @@ function App:BuildUI()
 						TeleportService:TeleportToPlaceInstance(placeId, best.id, LocalPlayer)
 					end)
 				else
-					notify("Server Hop", "No server found. Normal teleport.", 3)
-					pcall(function() TeleportService:Teleport(placeId, LocalPlayer) end)
+					notify("Server Hop", "No server found. Trying normal teleport.", 3)
+					pcall(function()
+						TeleportService:Teleport(placeId, LocalPlayer)
+					end)
 				end
 			end)
-		end))
+		end)
 	end
 
-	-- Client placeholder
+	----------------------------------------------------------------
+	-- CLIENT TAB (placeholder)
+	----------------------------------------------------------------
 	do
-		local t = UI.Text(clientScroll, "Client controls (coming soon)", 14, true)
-		t.Size = UDim2.new(1, 0, 0, 60)
+		local t = makeText(clientScroll, "Controls\n(Coming soon)", 14, true)
+		t.Size = UDim2.new(1, 0, 0, 50)
 	end
 
-	-- Tabs
-	self:_addTab("Info", 1)
-	self:_addTab("Controls", 2)
-	self:_addTab("Fly", 3)
-	self:_addTab("Anim Packs", 4)
-	self:_addTab("Player", 5)
-	self:_addTab("Camera", 6)
-	self:_addTab("Lighting", 7)
-	self:_addTab("Server", 8)
-	self:_addTab("Client", 9)
-	if micupScroll then
-		self:_addTab("Mic up", 10)
-	end
+	----------------------------------------------------------------
+	-- Tabs buttons + switching
+	----------------------------------------------------------------
+	local tabButtons = {}
+	local activePageName = "Info"
 
-	self.Pages["Info"].Page.Visible = true
-	setTabActive(self.TabButtons["Info"], true)
+	local function switchPage(pageName)
+		if pageName == activePageName then return end
+		local newPg = pages[pageName]
+		local oldPg = pages[activePageName]
+		if not newPg then return end
 
-	self.Maid:Give(self.ArrowBtn.MouseButton1Click:Connect(function()
-		self:_setMenu(not self.MenuOpen, false)
-	end))
-
-	self.ToggleMenuFn = function()
-		self:_setMenu(not self.MenuOpen, false)
-	end
-
-	self.MenuHandle.Visible = false
-	self.MenuFrame.Visible = false
-
-	playIntro(gui)
-
-	task.delay(CONFIG.UI.MenuShowDelaySeconds, function()
-		if not gui.Parent then return end
-		self.MenuHandle.Visible = true
-		if CONFIG.UI.MenuStartClosed then
-			self:_setMenu(false, true)
-		else
-			self:_setMenu(true, true)
+		for n, btn in pairs(tabButtons) do
+			setTabButtonActive(btn, n == pageName)
 		end
+
+		local newFrame = newPg.Page
+		local oldFrame = oldPg and oldPg.Page or nil
+
+		newFrame.Visible = true
+		newFrame.Position = UDim2.new(0, 26, 0, 0)
+
+		tween(newFrame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0, 0, 0, 0)
+		})
+
+		if oldFrame then
+			local twn = tween(oldFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				Position = UDim2.new(0, -26, 0, 0)
+			})
+			twn.Completed:Connect(function()
+				oldFrame.Visible = false
+				oldFrame.Position = UDim2.new(0, 0, 0, 0)
+			end)
+		end
+
+		activePageName = pageName
+	end
+
+	local function addTabButton(pageName, order, w)
+		local b = makeButton(tabsBar, pageName)
+		b.LayoutOrder = order or 1
+		b.Size = UDim2.new(0, w or 120, 0, 38)
+		tabButtons[pageName] = b
+
+		b.MouseButton1Click:Connect(function()
+			switchPage(pageName)
+		end)
+	end
+
+	addTabButton("Info", 1)
+	addTabButton("Controls", 2, 130)
+	addTabButton("Fly", 3)
+	addTabButton("Anim Packs", 4, 140)
+	addTabButton("Player", 5)
+	addTabButton("Camera", 6)
+	addTabButton("Lighting", 7)
+	addTabButton("Server", 8)
+	addTabButton("Client", 9)
+	if micupPage then
+		addTabButton("Mic up", 10, 120)
+	end
+
+	pages["Info"].Page.Visible = true
+	setTabButtonActive(tabButtons["Info"], true)
+
+	----------------------------------------------------------------
+	-- Menu toggle (arrow), starts CLOSED and reliable
+	----------------------------------------------------------------
+	menuOpen = false
+	menuFrame.Visible = false
+	arrowButton.Text = "˄"
+
+	local openPos = menuFrame.Position
+	local closedPos = UDim2.new(openPos.X.Scale, openPos.X.Offset, openPos.Y.Scale, openPos.Y.Offset - (menuFrame.Size.Y.Offset + 10))
+
+	local function setMenu(open, instant)
+		menuOpen = open
+		arrowButton.Text = open and "˅" or "˄"
+
+		if menuTween then
+			pcall(function() menuTween:Cancel() end)
+			menuTween = nil
+		end
+
+		if instant then
+			menuFrame.Visible = open
+			menuFrame.Position = open and openPos or closedPos
+			menuFrame.BackgroundTransparency = open and 0.18 or 1
+			return
+		end
+
+		if open then
+			menuFrame.Visible = true
+			menuFrame.Position = closedPos
+			menuFrame.BackgroundTransparency = 1
+			menuTween = tween(menuFrame, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Position = openPos,
+				BackgroundTransparency = 0.18
+			})
+		else
+			menuTween = tween(menuFrame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				Position = closedPos,
+				BackgroundTransparency = 1
+			})
+			menuTween.Completed:Connect(function()
+				if not menuOpen then
+					menuFrame.Visible = false
+				end
+			end)
+		end
+	end
+
+	arrowButton.MouseButton1Click:Connect(function()
+		setMenu(not menuOpen, false)
 	end)
 
+	setMenu(false, true)
+
+	----------------------------------------------------------------
+	-- Mobile Fly button (only on mobile)
+	----------------------------------------------------------------
 	local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 	if isMobile then
-		local mobileBtn = UI.Button(gui, "Fly")
-		mobileBtn.Name = "MobileFly"
-		mobileBtn.AnchorPoint = Vector2.new(1, 1)
-		mobileBtn.Position = CONFIG.UI.MobileFlyPos
-		mobileBtn.Size = CONFIG.UI.MobileFlySize
-		mobileBtn.TextSize = 18
+		mobileFlyButton = makeButton(gui, "Fly")
+		mobileFlyButton.Name = "MobileFly"
+		mobileFlyButton.AnchorPoint = Vector2.new(1, 1)
+		mobileFlyButton.Position = MOBILE_FLY_POS
+		mobileFlyButton.Size = MOBILE_FLY_SIZE
+		mobileFlyButton.TextSize = 18
 
-		self.Maid:Give(mobileBtn.MouseButton1Click:Connect(function()
-			self.Flight:Toggle()
-		end))
-	end
-end
-
-function App:BindInputs()
-	self.Maid:Give(UserInputService.InputBegan:Connect(function(input, gp)
-		if gp then return end
-		if input.KeyCode == CONFIG.Keys.ToggleFly then
-			self.Flight:Toggle()
-		elseif input.KeyCode == CONFIG.Keys.ToggleMenu then
-			if self.ToggleMenuFn then
-				self.ToggleMenuFn()
-			end
-		end
-	end))
-end
-
-function App:BindCharacter()
-	local function onChar(char)
-		task.wait(0.05)
-		self.Flight:BindCharacter(char)
-
-		local hum = char:FindFirstChildOfClass("Humanoid")
-		if hum then
-			if self.PlayerSpeed then
-				hum.WalkSpeed = self.PlayerSpeed
-				self.OriginalWalkSpeed = self.PlayerSpeed
-			else
-				self.OriginalWalkSpeed = hum.WalkSpeed
-				self.PlayerSpeed = hum.WalkSpeed
-			end
-
-			for state, asset in pairs(StateOverrides) do
-				if asset then
-					applyStateOverride(char, hum, state, asset)
-				end
-			end
-
-			self:ApplyCameraSettings()
-		end
-
-		if self.Flight.Flying then
-			self.Flight:Stop()
-		end
+		mobileFlyButton.MouseButton1Click:Connect(function()
+			if flying then stopFlying() else startFlying() end
+		end)
 	end
 
-	if LocalPlayer.Character then
-		onChar(LocalPlayer.Character)
+	applyPlayerSpeed()
+	applyCameraSettings()
+	syncLightingToggles()
+end
+
+--------------------------------------------------------------------
+-- INPUT
+--------------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+
+	if input.KeyCode == flightToggleKey then
+		if flying then stopFlying() else startFlying() end
+	elseif input.KeyCode == menuToggleKey then
+		if arrowButton then
+			arrowButton:Activate()
+		end
+	end
+end)
+
+--------------------------------------------------------------------
+-- RENDER LOOP (Flight + FPS)
+--------------------------------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+	fpsAcc = fpsAcc + dt
+	fpsFrames = fpsFrames + 1
+	if fpsAcc >= 0.25 then
+		fpsValue = math.floor((fpsFrames / fpsAcc) + 0.5)
+		fpsAcc = 0
+		fpsFrames = 0
 	end
 
-	self.Maid:Give(LocalPlayer.CharacterAdded:Connect(onChar))
-end
-
-function App:StartLoops()
-	self.Maid:Give(RunService.RenderStepped:Connect(function(dt)
-		self.FpsAcc += dt
-		self.FpsFrames += 1
-		if self.FpsAcc >= 0.25 then
-			self.FpsValue = math.floor((self.FpsFrames / self.FpsAcc) + 0.5)
-			self.FpsAcc = 0
-			self.FpsFrames = 0
+	if fpsLabel then
+		fpsLabel.Text = tostring(fpsValue) .. " fps"
+		if fpsValue < 40 then
+			fpsLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+		elseif fpsValue < 60 then
+			fpsLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
+		elseif fpsValue < 76 then
+			fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+		elseif fpsValue < 121 then
+			fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 220)
+		elseif fpsValue < 241 then
+			fpsLabel.TextColor3 = Color3.fromRGB(80, 140, 255)
+		else
+			rainbowHue = (rainbowHue + dt * 0.6) % 1
+			fpsLabel.TextColor3 = Color3.fromHSV(rainbowHue, 1, 1)
 		end
+	end
 
-		if self.FpsLabel then
-			self.FpsLabel.Text = tostring(self.FpsValue) .. " fps"
-			if self.FpsValue < 40 then
-				self.FpsLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-			elseif self.FpsValue < 60 then
-				self.FpsLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
-			elseif self.FpsValue < 76 then
-				self.FpsLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-			elseif self.FpsValue < 121 then
-				self.FpsLabel.TextColor3 = Color3.fromRGB(80, 255, 220)
-			elseif self.FpsValue < 241 then
-				self.FpsLabel.TextColor3 = Color3.fromRGB(80, 140, 255)
-			else
-				self.RainbowHue = (self.RainbowHue + dt * 0.6) % 1
-				self.FpsLabel.TextColor3 = Color3.fromHSV(self.RainbowHue, 1, 1)
-			end
+	if not flying or not rootPart or not camera or not bodyGyro or not bodyVel then return end
+
+	updateMovementInput()
+
+	local camCF = camera.CFrame
+	local camLook = camCF.LookVector
+	local camRight = camCF.RightVector
+
+	local moveDir = Vector3.new(0, 0, 0)
+	moveDir = moveDir + camLook * (-moveInput.Z)
+	moveDir = moveDir + camRight * (moveInput.X)
+	moveDir = moveDir + Vector3.new(0, verticalInput, 0)
+
+	local moveMagnitude = moveDir.Magnitude
+	local hasHorizontal = Vector3.new(moveInput.X, 0, moveInput.Z).Magnitude > 0.01
+
+	if moveMagnitude > 0 then
+		local unit = moveDir.Unit
+		local targetVel = unit * flySpeed
+		local alphaVel = clamp01(dt * velocityLerpRate)
+		currentVelocity = currentVelocity:Lerp(targetVel, alphaVel)
+	else
+		local alphaIdle = clamp01(dt * idleSlowdownRate)
+		currentVelocity = currentVelocity:Lerp(Vector3.new(), alphaIdle)
+	end
+	bodyVel.Velocity = currentVelocity
+
+	local lookDir
+	if moveMagnitude > 0.05 then
+		lookDir = moveDir.Unit
+	else
+		lookDir = camLook.Unit
+	end
+
+	if lookDir.Magnitude < 0.01 then
+		lookDir = Vector3.new(0, 0, -1)
+	end
+
+	local baseCF = CFrame.lookAt(rootPart.Position, rootPart.Position + lookDir)
+
+	local tiltDeg
+	if moveMagnitude > 0.1 then
+		tiltDeg = MOVING_TILT_DEG
+	else
+		tiltDeg = IDLE_TILT_DEG
+	end
+
+	-- Q/E special tilt when only vertical
+	if not hasHorizontal and verticalInput < 0 then
+		tiltDeg = 90
+	elseif not hasHorizontal and verticalInput > 0 then
+		tiltDeg = 0
+	end
+
+	local targetCF = baseCF * CFrame.Angles(-math.rad(tiltDeg), 0, 0)
+
+	if not currentGyroCFrame then
+		currentGyroCFrame = targetCF
+	end
+	currentGyroCFrame = currentGyroCFrame:Lerp(targetCF, clamp01(dt * rotationLerpRate))
+	bodyGyro.CFrame = currentGyroCFrame
+
+	if humanoid and humanoid.RigType ~= Enum.HumanoidRigType.R6 then
+		local now = os.clock()
+		local shouldFlyAnim = (moveMagnitude > ANIM_TO_FLY_THRESHOLD)
+		local shouldFloatAnim = (moveMagnitude < ANIM_TO_FLOAT_THRESHOLD)
+
+		if shouldFlyAnim and animMode ~= "Fly" and (now - lastAnimSwitch) >= ANIM_SWITCH_COOLDOWN then
+			animMode = "Fly"
+			lastAnimSwitch = now
+			playFly()
+		elseif shouldFloatAnim and animMode ~= "Float" and (now - lastAnimSwitch) >= ANIM_SWITCH_COOLDOWN then
+			animMode = "Float"
+			lastAnimSwitch = now
+			playFloat()
 		end
+	end
 
-		self.Flight:Update(dt)
-	end))
-end
+	if rightShoulder and defaultShoulderC0 and character then
+		local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+		if torso then
+			local relDir = torso.CFrame:VectorToObjectSpace(camLook)
+			local yaw = math.atan2(-relDir.Z, relDir.X)
+			local pitch = math.asin(relDir.Y)
 
---====================================================
--- Boot
---====================================================
-local app = App.new()
-app:BuildUI()
-app:BindInputs()
-app:BindCharacter()
-app:StartLoops()
+			local armCF =
+				CFrame.new() *
+				CFrame.Angles(0, -math.pi/2, 0) *
+				CFrame.Angles(-pitch * 0.9, 0, -yaw * 0.25)
 
-app:ApplyCameraSettings()
+			rightShoulder.C0 = defaultShoulderC0 * armCF
+		end
+	end
+end)
+
+--------------------------------------------------------------------
+-- MAIN
+--------------------------------------------------------------------
+loadSettings()
+getCharacter()
+createUI()
+applyPlayerSpeed()
+applyCameraSettings()
+reapplyAllOverridesAfterRespawn()
+syncLightingToggles()
+
+LocalPlayer.CharacterAdded:Connect(function()
+	task.wait(0.15)
+	getCharacter()
+
+	applyPlayerSpeed()
+	applyCameraSettings()
+	reapplyAllOverridesAfterRespawn()
+	syncLightingToggles()
+
+	if flying then
+		stopFlying()
+	end
+end)
+
 notify("SOS HUD", "Loaded.", 2)
