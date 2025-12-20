@@ -2,13 +2,26 @@
 	SOS HUD
 	Single LocalScript (StarterPlayerScripts recommended)
 
-	Update in this version:
-	- Mini red "AK" shows on a player's tag if they type "؍؍؍" or "؍"
-	- They do NOT need to have the Sin role for the AK to show
-	- Typing the AK marker also forces them to get an SOS tag (so the AK has something to appear on)
+	This build includes:
+	- Shift Lock safe camera attach modes (CameraSubject always Humanoid)
+	- SOS tags and role tags
+	- AK and Fake AK indicators as separate systems (same detection pipe)
+	- Tags are 30 percent smaller, centered text, clickable actions:
+		Normal click: teleport behind them by 5 studs
+		Hold LeftCtrl (or RightCtrl) then click: show account age and extra stats
+	- Owner tag: says "SOS Owner" and is the only one with glitch styling (neon yellow text, dark black glass)
 
-	(If this breaks, blame ping. Classic.)
+	Small British note: if this breaks, it was definitely lag. Not your fault. Probably.
 ]]
+
+--------------------------------------------------------------------
+-- EARLY LOAD YIELD (join safe)
+--------------------------------------------------------------------
+if not game:IsLoaded() then
+	pcall(function()
+		game.Loaded:Wait()
+	end)
+end
 
 --------------------------------------------------------------------
 -- SERVICES
@@ -1298,7 +1311,6 @@ local function applySkyPreset(name)
 	if LightingState.Toggles.Atmosphere then
 		setAtmosphereOn(atm)
 	else
-		setAtmosphereOn(atm)
 		setAtmosphereOff(atm)
 	end
 end
@@ -1517,10 +1529,14 @@ end
 
 --------------------------------------------------------------------
 -- SOS TAG SYSTEM (integrated)
+-- Separate signals:
+--   SOS marker (¬) indicates "SOS script user" (enables role tags like Sin)
+--   AK marker (؍؍؍ or ؍) indicates AK indicator badge
+--   Fake AK marker indicates Fake AK indicator badge
 --------------------------------------------------------------------
 local ROLE_COLOR = {
 	Normal = Color3.fromRGB(120, 190, 235),
-	Owner  = Color3.fromRGB(255, 210, 90),
+	Owner  = Color3.fromRGB(255, 240, 80), -- neon yellow vibe
 	Tester = Color3.fromRGB(60, 255, 90),
 	Sin    = Color3.fromRGB(235, 70, 70),
 }
@@ -1551,29 +1567,45 @@ local SinProfiles = {
 local SOS_MARKER = "¬"
 local AK_MARKER_1 = "؍؍؍"
 local AK_MARKER_2 = "؍"
+local FAKE_AK_MARKER = ",,κžκåçţíѷåţȇđ,,"
 
-local ScriptUsers = {}
+-- Independent state tables
+local SOSUsers = {}
 local AKUsers = {}
+local FakeAKUsers = {}
+
+local function hasCtrlHeld()
+	return UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+end
 
 local function getRole(plr)
 	if not plr then return nil end
+	local uid = plr.UserId
 
-	if OwnerNames[plr.Name] or OwnerUserIds[plr.UserId] then
-		return "Owner"
-	end
-	if TesterUserIds[plr.UserId] then
-		return "Tester"
-	end
-	if SinProfiles[plr.UserId] then
-		return "Sin"
+	local hasSOS = (SOSUsers[uid] == true)
+	local hasAnyBadge = (AKUsers[uid] == true) or (FakeAKUsers[uid] == true)
+
+	-- Only show any tag if they have SOS or at least one badge
+	if not hasSOS and not hasAnyBadge then
+		return nil
 	end
 
-	-- Normal tag if they are a known script user OR they typed the AK marker
-	if ScriptUsers[plr.UserId] or AKUsers[plr.UserId] then
+	-- Roles only apply when SOS marker is used
+	if hasSOS then
+		if OwnerNames[plr.Name] or OwnerUserIds[uid] then
+			return "Owner"
+		end
+		if TesterUserIds[uid] then
+			return "Tester"
+		end
+		if SinProfiles[uid] then
+			return "Sin"
+		end
 		return "Normal"
 	end
 
-	return nil
+	-- If they only used AK or Fake AK, never give Sin or Owner etc
+	return "Normal"
 end
 
 local function getRoleColor(plr, role)
@@ -1588,7 +1620,7 @@ end
 
 local function getTopLine(plr, role)
 	if role == "Owner" then
-		return "Owner"
+		return "SOS Owner"
 	end
 	if role == "Tester" then
 		return "SOS Tester"
@@ -1603,7 +1635,7 @@ local function getTopLine(plr, role)
 	return "SOS User"
 end
 
-local function teleportToPlayer(plr)
+local function teleportBehindPlayer(plr)
 	if not plr or plr == LocalPlayer then return end
 	local myChar = LocalPlayer.Character
 	local theirChar = plr.Character
@@ -1613,7 +1645,49 @@ local function teleportToPlayer(plr)
 	local theirHRP = theirChar:FindFirstChild("HumanoidRootPart")
 	if not myHRP or not theirHRP then return end
 
-	myHRP.CFrame = theirHRP.CFrame * CFrame.new(0, 0, 3)
+	local behind = -theirHRP.CFrame.LookVector
+	if behind.Magnitude < 0.01 then behind = Vector3.new(0, 0, 1) end
+	local targetPos = theirHRP.Position + (behind.Unit * 5) + Vector3.new(0, 0.25, 0)
+	myHRP.CFrame = CFrame.new(targetPos, theirHRP.Position)
+end
+
+local function showAccountStats(plr)
+	if not plr then return end
+
+	local age = plr.AccountAge or 0
+	local teamName = (plr.Team and plr.Team.Name) or "None"
+	local displayName = plr.DisplayName or plr.Name
+
+	local posText = "N/A"
+	local hpText = "N/A"
+	local wsText = "N/A"
+	pcall(function()
+		local c = plr.Character
+		if c then
+			local h = c:FindFirstChildOfClass("Humanoid")
+			local hrp = c:FindFirstChild("HumanoidRootPart")
+			if h then
+				hpText = string.format("%.0f / %.0f", h.Health, h.MaxHealth)
+				wsText = tostring(h.WalkSpeed)
+			end
+			if hrp then
+				local p = hrp.Position
+				posText = string.format("%.1f, %.1f, %.1f", p.X, p.Y, p.Z)
+			end
+		end
+	end)
+
+	local txt =
+		"Name: " .. plr.Name .. "\n" ..
+		"Display: " .. displayName .. "\n" ..
+		"UserId: " .. tostring(plr.UserId) .. "\n" ..
+		"AccountAge: " .. tostring(age) .. " days\n" ..
+		"Team: " .. teamName .. "\n" ..
+		"Health: " .. hpText .. "\n" ..
+		"WalkSpeed: " .. wsText .. "\n" ..
+		"Position: " .. posText
+
+	notify("Account Stats", txt, 7)
 end
 
 local function destroyExistingTag(char)
@@ -1622,6 +1696,98 @@ local function destroyExistingTag(char)
 	if old then
 		old:Destroy()
 	end
+end
+
+local function createBadge(parent, text, fillColor, strokeColor)
+	local badge = Instance.new("Frame")
+	badge.Name = "Badge_" .. text
+	badge.Size = UDim2.new(0, 18, 0, 18)
+	badge.BackgroundColor3 = fillColor
+	badge.BackgroundTransparency = 0.18
+	badge.BorderSizePixel = 0
+	badge.Parent = parent
+	makeCorner(badge, 999)
+
+	local st = Instance.new("UIStroke")
+	st.Color = strokeColor
+	st.Thickness = 1
+	st.Transparency = 0.05
+	st.Parent = badge
+
+	local lbl = Instance.new("TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.Font = Enum.Font.GothamBlack
+	lbl.TextSize = 10
+	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	lbl.TextXAlignment = Enum.TextXAlignment.Center
+	lbl.TextYAlignment = Enum.TextYAlignment.Center
+	lbl.Text = text
+	lbl.Parent = badge
+
+	return badge
+end
+
+local function applyOwnerGlitch(topLabel)
+	if not topLabel then return end
+
+	local ghost = Instance.new("TextLabel")
+	ghost.Name = "GlitchGhost"
+	ghost.BackgroundTransparency = 1
+	ghost.Size = topLabel.Size
+	ghost.Position = topLabel.Position
+	ghost.Font = topLabel.Font
+	ghost.TextSize = topLabel.TextSize
+	ghost.TextXAlignment = topLabel.TextXAlignment
+	ghost.TextYAlignment = topLabel.TextYAlignment
+	ghost.Text = topLabel.Text
+	ghost.TextColor3 = Color3.fromRGB(0, 0, 0)
+	ghost.TextTransparency = 0.65
+	ghost.ZIndex = topLabel.ZIndex + 1
+	ghost.Parent = topLabel.Parent
+
+	local running = true
+	topLabel.AncestryChanged:Connect(function(_, p)
+		if not p then
+			running = false
+		end
+	end)
+
+	task.spawn(function()
+		local base = topLabel.Text
+		local glitchChars = { "▓", "▒", "░", "#", "@", "%", "&", "*", "!" }
+		local t = 0
+		while running do
+			task.wait(0.06)
+			t = t + 1
+
+			if not topLabel.Parent then break end
+
+			-- subtle jitter
+			local jx = math.random(-1, 1)
+			local jy = math.random(-1, 1)
+			ghost.Position = UDim2.new(topLabel.Position.X.Scale, topLabel.Position.X.Offset + jx, topLabel.Position.Y.Scale, topLabel.Position.Y.Offset + jy)
+
+			-- occasionally scramble 1 char
+			if (t % 6) == 0 then
+				local s = base
+				local idx = math.random(1, #s)
+				local rep = glitchChars[math.random(1, #glitchChars)]
+				local newText = s:sub(1, idx - 1) .. rep .. s:sub(idx + 1)
+				ghost.Text = newText
+				ghost.TextTransparency = 0.55
+				task.delay(0.08, function()
+					if ghost and ghost.Parent then
+						ghost.Text = base
+						ghost.TextTransparency = 0.70
+					end
+				end)
+			else
+				ghost.Text = base
+				ghost.TextTransparency = 0.72
+			end
+		end
+	end)
 end
 
 local function createTagForPlayer(plr)
@@ -1647,12 +1813,13 @@ local function createTagForPlayer(plr)
 	local color = getRoleColor(plr, role)
 	if not color then return end
 
+	-- 30 percent smaller than old (old: 205 x 52)
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "SOS_UserTag"
 	bb.Adornee = adornee
 	bb.AlwaysOnTop = true
-	bb.Size = UDim2.new(0, 205, 0, 52)
-	bb.StudsOffset = Vector3.new(0, 3.25, 0)
+	bb.Size = UDim2.new(0, 144, 0, 36)
+	bb.StudsOffset = Vector3.new(0, 2.75, 0)
 	bb.Parent = char
 
 	local shadow = Instance.new("Frame")
@@ -1668,84 +1835,110 @@ local function createTagForPlayer(plr)
 	local btn = Instance.new("TextButton")
 	btn.Name = "ClickArea"
 	btn.Size = UDim2.new(1, 0, 1, 0)
-	btn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-	btn.BackgroundTransparency = 0.22
 	btn.BorderSizePixel = 0
 	btn.Text = ""
 	btn.AutoButtonColor = true
 	btn.Parent = bb
 	makeCorner(btn, 10)
 
+	local isOwner = (role == "Owner")
+	if isOwner then
+		btn.BackgroundColor3 = Color3.fromRGB(6, 6, 8)
+		btn.BackgroundTransparency = 0.10
+	else
+		btn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+		btn.BackgroundTransparency = 0.22
+	end
+
 	local grad = Instance.new("UIGradient")
 	grad.Rotation = 90
-	grad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 24, 30)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 12)),
-	})
+	if isOwner then
+		grad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(12, 12, 16)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(2, 2, 3)),
+		})
+	else
+		grad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 24, 30)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 12)),
+		})
+	end
 	grad.Parent = btn
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = color
+	stroke.Color = isOwner and Color3.fromRGB(255, 245, 90) or color
 	stroke.Thickness = 2
-	stroke.Transparency = 0.05
+	stroke.Transparency = isOwner and 0.00 or 0.05
 	stroke.Parent = btn
 
-	local topRow = Instance.new("Frame")
-	topRow.Name = "TopRow"
-	topRow.BackgroundTransparency = 1
-	topRow.Size = UDim2.new(1, -10, 0, 22)
-	topRow.Position = UDim2.new(0, 5, 0, 4)
-	topRow.Parent = btn
+	-- Badge container (above the tag)
+	local badgeRow = Instance.new("Frame")
+	badgeRow.Name = "BadgeRow"
+	badgeRow.BackgroundTransparency = 1
+	badgeRow.Size = UDim2.new(1, 0, 0, 18)
+	badgeRow.Position = UDim2.new(0, 0, 0, -14)
+	badgeRow.Parent = btn
 
-	local topLayout = Instance.new("UIListLayout")
-	topLayout.FillDirection = Enum.FillDirection.Horizontal
-	topLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	topLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	topLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	topLayout.Padding = UDim.new(0, 6)
-	topLayout.Parent = topRow
+	local badgeLayout = Instance.new("UIListLayout")
+	badgeLayout.FillDirection = Enum.FillDirection.Horizontal
+	badgeLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	badgeLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	badgeLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	badgeLayout.Padding = UDim.new(0, 6)
+	badgeLayout.Parent = badgeRow
 
+	if AKUsers[plr.UserId] == true then
+		createBadge(badgeRow, "AK", Color3.fromRGB(255, 70, 70), Color3.fromRGB(0, 0, 0))
+	end
+	if FakeAKUsers[plr.UserId] == true then
+		createBadge(badgeRow, "FAK", Color3.fromRGB(60, 140, 255), Color3.fromRGB(0, 0, 0))
+	end
+
+	-- Top line (centered)
 	local top = Instance.new("TextLabel")
 	top.BackgroundTransparency = 1
-	top.Size = UDim2.new(0, 140, 1, 0)
+	top.Size = UDim2.new(1, -8, 0, 16)
+	top.Position = UDim2.new(0, 4, 0, 3)
 	top.Font = Enum.Font.GothamBold
-	top.TextSize = 15
-	top.TextColor3 = color
+	top.TextSize = 12
 	top.TextXAlignment = Enum.TextXAlignment.Center
+	top.TextYAlignment = Enum.TextYAlignment.Center
+	top.TextWrapped = true
 	top.Text = getTopLine(plr, role)
-	top.Parent = topRow
+	top.Parent = btn
 
-	local ak = Instance.new("TextLabel")
-	ak.Name = "AK"
-	ak.BackgroundTransparency = 1
-	ak.Size = UDim2.new(0, 26, 1, 0)
-	ak.Font = Enum.Font.GothamBlack
-	ak.TextSize = 13
-	ak.TextColor3 = Color3.fromRGB(255, 60, 60)
-	ak.TextXAlignment = Enum.TextXAlignment.Center
-	ak.Text = "AK"
-	ak.Visible = (AKUsers[plr.UserId] == true)
-	ak.Parent = topRow
+	if isOwner then
+		top.TextColor3 = Color3.fromRGB(255, 245, 90)
+		local topStroke = Instance.new("UIStroke")
+		topStroke.Color = Color3.fromRGB(0, 0, 0)
+		topStroke.Transparency = 0.25
+		topStroke.Thickness = 1
+		topStroke.Parent = top
 
-	local akStroke = Instance.new("UIStroke")
-	akStroke.Color = Color3.fromRGB(0, 0, 0)
-	akStroke.Transparency = 0.35
-	akStroke.Thickness = 1
-	akStroke.Parent = ak
+		applyOwnerGlitch(top)
+	else
+		top.TextColor3 = color
+	end
 
+	-- Bottom name (centered)
 	local bottom = Instance.new("TextLabel")
 	bottom.BackgroundTransparency = 1
-	bottom.Size = UDim2.new(1, -10, 0, 22)
-	bottom.Position = UDim2.new(0, 5, 0, 26)
+	bottom.Size = UDim2.new(1, -8, 0, 16)
+	bottom.Position = UDim2.new(0, 4, 0, 18)
 	bottom.Font = Enum.Font.Gotham
-	bottom.TextSize = 13
+	bottom.TextSize = 11
 	bottom.TextColor3 = Color3.fromRGB(230, 230, 230)
 	bottom.TextXAlignment = Enum.TextXAlignment.Center
+	bottom.TextYAlignment = Enum.TextYAlignment.Center
 	bottom.Text = plr.Name
 	bottom.Parent = btn
 
 	btn.Activated:Connect(function()
-		teleportToPlayer(plr)
+		if hasCtrlHeld() then
+			showAccountStats(plr)
+		else
+			teleportBehindPlayer(plr)
+		end
 	end)
 end
 
@@ -1759,22 +1952,22 @@ end
 local function hookPlayerForTags(plr)
 	if not plr then return end
 	plr.CharacterAdded:Connect(function()
-		task.wait(0.2)
+		task.wait(0.12)
 		refreshTag(plr)
 	end)
 
 	if plr.Character then
-		task.wait(0.2)
+		task.wait(0.12)
 		refreshTag(plr)
 	end
 end
 
-local function onMarkerSeen(userId)
+-- Marker handlers
+local function onSOSSeen(userId)
 	if typeof(userId) ~= "number" then return end
-	if not ScriptUsers[userId] then
-		ScriptUsers[userId] = true
+	if not SOSUsers[userId] then
+		SOSUsers[userId] = true
 	end
-
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.UserId == userId then
 			refreshTag(plr)
@@ -1785,17 +1978,9 @@ end
 
 local function onAKSeen(userId)
 	if typeof(userId) ~= "number" then return end
-
-	-- AK should work for anyone, so:
-	-- 1) Mark them as AK user
-	-- 2) Also force them into ScriptUsers so they get a tag even if they never sent the SOS marker
 	if not AKUsers[userId] then
 		AKUsers[userId] = true
 	end
-	if not ScriptUsers[userId] then
-		ScriptUsers[userId] = true
-	end
-
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.UserId == userId then
 			refreshTag(plr)
@@ -1804,28 +1989,56 @@ local function onAKSeen(userId)
 	end
 end
 
-local function broadcastMarker()
-	onMarkerSeen(LocalPlayer.UserId)
+local function onFakeAKSeen(userId)
+	if typeof(userId) ~= "number" then return end
+	if not FakeAKUsers[userId] then
+		FakeAKUsers[userId] = true
+	end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.UserId == userId then
+			refreshTag(plr)
+			break
+		end
+	end
+end
 
+-- Chat send helpers (TextChatService only, no RemoteEvent fallback)
+local function trySendChat(text)
+	local sent = false
 	pcall(function()
 		if TextChatService and TextChatService.TextChannels then
 			local general = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
 			if general and general.SendAsync then
-				general:SendAsync(SOS_MARKER)
-				return
+				general:SendAsync(text)
+				sent = true
 			end
 		end
 	end)
+	return sent
+end
 
-	pcall(function()
-		local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-		if events then
-			local say = events:FindFirstChild("SayMessageRequest")
-			if say and say.FireServer then
-				say:FireServer(SOS_MARKER, "All")
-			end
-		end
-	end)
+local function broadcastSOSMarker()
+	onSOSSeen(LocalPlayer.UserId)
+	local ok = trySendChat(SOS_MARKER)
+	if not ok then
+		dprint("TextChatService SendAsync not available. SOS marker only applied locally.")
+	end
+end
+
+local function broadcastAKMarker()
+	onAKSeen(LocalPlayer.UserId)
+	local ok = trySendChat(AK_MARKER_1)
+	if not ok then
+		dprint("TextChatService SendAsync not available. AK marker only applied locally.")
+	end
+end
+
+local function broadcastFakeAKMarker()
+	onFakeAKSeen(LocalPlayer.UserId)
+	local ok = trySendChat(FAKE_AK_MARKER)
+	if not ok then
+		dprint("TextChatService SendAsync not available. Fake AK marker only applied locally.")
+	end
 end
 
 local function hookChatListeners()
@@ -1837,7 +2050,7 @@ local function hookChatListeners()
 
 			if text == SOS_MARKER then
 				if src and src.UserId then
-					onMarkerSeen(src.UserId)
+					onSOSSeen(src.UserId)
 				end
 				return
 			end
@@ -1848,6 +2061,13 @@ local function hookChatListeners()
 				end
 				return
 			end
+
+			if text == FAKE_AK_MARKER then
+				if src and src.UserId then
+					onFakeAKSeen(src.UserId)
+				end
+				return
+			end
 		end)
 	end
 
@@ -1855,9 +2075,11 @@ local function hookChatListeners()
 		pcall(function()
 			plr.Chatted:Connect(function(message)
 				if message == SOS_MARKER then
-					onMarkerSeen(plr.UserId)
+					onSOSSeen(plr.UserId)
 				elseif message == AK_MARKER_1 or message == AK_MARKER_2 then
 					onAKSeen(plr.UserId)
+				elseif message == FAKE_AK_MARKER then
+					onFakeAKSeen(plr.UserId)
 				end
 			end)
 		end)
@@ -1867,9 +2089,11 @@ local function hookChatListeners()
 		pcall(function()
 			plr.Chatted:Connect(function(message)
 				if message == SOS_MARKER then
-					onMarkerSeen(plr.UserId)
+					onSOSSeen(plr.UserId)
 				elseif message == AK_MARKER_1 or message == AK_MARKER_2 then
 					onAKSeen(plr.UserId)
+				elseif message == FAKE_AK_MARKER then
+					onFakeAKSeen(plr.UserId)
 				end
 			end)
 		end)
@@ -2045,10 +2269,10 @@ local function createUI()
 		header.Size = UDim2.new(1, 0, 0, 22)
 
 		local msg = makeText(infoScroll,
-			"Discord:\nPress to copy, or it will open if copy isn't supported.\n\nSOS Tag System:\nA marker is broadcast once when you load.\nIf someone else also runs this HUD, they will get an SOS tag.\nIf they type ؍؍؍ or ؍, they get a mini red AK next to the tag.\nTyping AK marker also forces a tag to appear.\nClick a tag to teleport.\n",
+			"Discord:\nPress to copy, or it will open if copy isn't supported.\n\nTags:\n- SOS marker: " .. SOS_MARKER .. " (enables role tag like Sin)\n- AK marker: " .. AK_MARKER_1 .. " or " .. AK_MARKER_2 .. " (AK badge above tag)\n- Fake AK marker: (FAK badge above tag)\n\nClick a tag:\n- Normal click teleports behind them by 5 studs\n- Hold Ctrl then click to view stats\n",
 			14, false
 		)
-		msg.Size = UDim2.new(1, 0, 0, 185)
+		msg.Size = UDim2.new(1, 0, 0, 205)
 
 		local row = Instance.new("Frame")
 		row.BackgroundTransparency = 1
@@ -2095,10 +2319,10 @@ local function createUI()
 		header.Size = UDim2.new(1, 0, 0, 22)
 
 		local info = makeText(controlsScroll,
-			"PC:\n- Fly Toggle: " .. flightToggleKey.Name .. "\n- Menu Toggle: " .. menuToggleKey.Name .. "\n- Move: WASD + Q/E\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu\n\nSOS Tag:\n- Click a tag to teleport\n- Type ؍؍؍ or ؍ for AK next to your tag",
+			"PC:\n- Fly Toggle: " .. flightToggleKey.Name .. "\n- Menu Toggle: " .. menuToggleKey.Name .. "\n- Move: WASD + Q/E\n\nTags:\n- Normal click tag: teleport behind target\n- Hold Ctrl then click tag: show stats\n",
 			14, false
 		)
-		info.Size = UDim2.new(1, 0, 0, 190)
+		info.Size = UDim2.new(1, 0, 0, 165)
 
 		local bindRow = Instance.new("Frame")
 		bindRow.BackgroundTransparency = 1
@@ -2145,14 +2369,34 @@ local function createUI()
 
 		local tagRow = Instance.new("Frame")
 		tagRow.BackgroundTransparency = 1
-		tagRow.Size = UDim2.new(1, 0, 0, 44)
+		tagRow.Size = UDim2.new(1, 0, 0, 94)
 		tagRow.Parent = controlsScroll
 
-		local tagBtn = makeButton(tagRow, "Broadcast SOS Marker")
-		tagBtn.Size = UDim2.new(0, 240, 0, 36)
-		tagBtn.MouseButton1Click:Connect(function()
-			broadcastMarker()
-			notify("SOS Tag", "Marker broadcasted.", 2)
+		local tagLay = Instance.new("UIListLayout")
+		tagLay.FillDirection = Enum.FillDirection.Horizontal
+		tagLay.Padding = UDim.new(0, 10)
+		tagLay.VerticalAlignment = Enum.VerticalAlignment.Center
+		tagLay.Parent = tagRow
+
+		local sosBtn = makeButton(tagRow, "Broadcast SOS")
+		sosBtn.Size = UDim2.new(0, 160, 0, 36)
+		sosBtn.MouseButton1Click:Connect(function()
+			broadcastSOSMarker()
+			notify("Tags", "Broadcasted SOS marker.", 2)
+		end)
+
+		local akBtn = makeButton(tagRow, "Broadcast AK")
+		akBtn.Size = UDim2.new(0, 140, 0, 36)
+		akBtn.MouseButton1Click:Connect(function()
+			broadcastAKMarker()
+			notify("Tags", "Broadcasted AK marker.", 2)
+		end)
+
+		local fakBtn = makeButton(tagRow, "Broadcast Fake AK")
+		fakBtn.Size = UDim2.new(0, 190, 0, 36)
+		fakBtn.MouseButton1Click:Connect(function()
+			broadcastFakeAKMarker()
+			notify("Tags", "Broadcasted Fake AK marker.", 2)
 		end)
 	end
 
@@ -2939,8 +3183,14 @@ local function createUI()
 	-- CLIENT TAB
 	----------------------------------------------------------------
 	do
-		local t = makeText(clientScroll, "Controls\n(Coming soon)", 14, true)
-		t.Size = UDim2.new(1, 0, 0, 50)
+		local t = makeText(clientScroll, "Client", 16, true)
+		t.Size = UDim2.new(1, 0, 0, 22)
+
+		local msg = makeText(clientScroll,
+			"Auto load:\nPut this LocalScript in StarterPlayerScripts so it runs every join.\n\nYield safe boot:\nThis script already waits for game load and PlayerGui.\n",
+			13, false
+		)
+		msg.Size = UDim2.new(1, 0, 0, 120)
 	end
 
 	----------------------------------------------------------------
@@ -3254,8 +3504,11 @@ end)
 
 hookChatListeners()
 
+-- Startup: broadcast all three markers so others can see roles and badges
 task.defer(function()
-	broadcastMarker()
+	broadcastSOSMarker()
+	broadcastAKMarker()
+	broadcastFakeAKMarker()
 end)
 
 createUI()
