@@ -2,7 +2,11 @@
 -- Put in StarterPlayerScripts
 -- SOS marker: ¬ (primary) and • (joiner)
 -- AK marker: ؍؍؍ or ؍
--- KSK: removed entirely
+-- New behavior:
+--   - 𖺗 is EXECUTED symbol
+--   - If someone else says 𖺗, you send ¬ once per sender
+-- UI:
+--   - Bottom-left broadcast buttons: SOS + AK
 
 --------------------------------------------------------------------
 -- SERVICES
@@ -53,6 +57,9 @@ local SOS_MARKER_JOINER  = "•"
 local AK_MARKER_1 = "؍؍؍"
 local AK_MARKER_2 = "؍"
 
+-- Executed symbol
+local EXECUTED_SYMBOL = "𖺗"
+
 -- tag sizing (smaller)
 local TAG_W, TAG_H = 144, 36
 local TAG_OFFSET_Y = 3
@@ -69,19 +76,21 @@ local INIT_DELAY = 0.9
 local SosUsers = {}
 local AkUsers = {}
 
+-- Auto-reply tracking (do not spam)
+local SentPrimaryForExecutedUserId = {}
+
 local gui
 local statsPopup
 local statsPopupLabel
 
+-- Bottom-left broadcast UI
+local broadcastPanel
+local broadcastSOS
+local broadcastAK
+
 --------------------------------------------------------------------
 -- HELPERS
 --------------------------------------------------------------------
-local function safeDestroy(inst)
-	if inst and inst.Parent then
-		inst:Destroy()
-	end
-end
-
 local function makeCorner(parent, r)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, r or 12)
@@ -209,6 +218,62 @@ local function ensureGui()
 	return gui
 end
 
+local function makeButton(parent, txt)
+	local b = Instance.new("TextButton")
+	b.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+	b.BackgroundTransparency = 0.2
+	b.BorderSizePixel = 0
+	b.AutoButtonColor = true
+	b.Text = txt or "Button"
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 13
+	b.TextColor3 = Color3.fromRGB(245, 245, 245)
+	b.Parent = parent
+	makeCorner(b, 10)
+
+	local st = Instance.new("UIStroke")
+	st.Color = Color3.fromRGB(200, 40, 40)
+	st.Thickness = 1
+	st.Transparency = 0.25
+	st.Parent = b
+
+	return b
+end
+
+local function ensureBroadcastPanel()
+	ensureGui()
+	if broadcastPanel and broadcastPanel.Parent then return end
+
+	broadcastPanel = Instance.new("Frame")
+	broadcastPanel.Name = "BroadcastPanel"
+	broadcastPanel.AnchorPoint = Vector2.new(0, 1)
+	broadcastPanel.Position = UDim2.new(0, 10, 1, -10)
+	broadcastPanel.Size = UDim2.new(0, 220, 0, 48)
+	broadcastPanel.BorderSizePixel = 0
+	broadcastPanel.Parent = gui
+	makeCorner(broadcastPanel, 14)
+	makeGlass(broadcastPanel)
+	makeStroke(broadcastPanel, 2, Color3.fromRGB(200, 40, 40), 0.1)
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 10)
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Parent = broadcastPanel
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
+	pad.Parent = broadcastPanel
+
+	broadcastSOS = makeButton(broadcastPanel, "Broadcast SOS")
+	broadcastSOS.Size = UDim2.new(0, 100, 0, 32)
+
+	broadcastAK = makeButton(broadcastPanel, "Broadcast AK")
+	broadcastAK.Size = UDim2.new(0, 100, 0, 32)
+end
+
 local function ensureStatsPopup()
 	ensureGui()
 	if statsPopup and statsPopup.Parent then return end
@@ -238,22 +303,10 @@ local function ensureStatsPopup()
 	statsPopupLabel.Text = ""
 	statsPopupLabel.Parent = statsPopup
 
-	local closeBtn = Instance.new("TextButton")
-	closeBtn.Name = "Close"
-	closeBtn.Size = UDim2.new(0, 140, 0, 34)
+	local closeBtn = makeButton(statsPopup, "Close")
 	closeBtn.AnchorPoint = Vector2.new(0.5, 1)
 	closeBtn.Position = UDim2.new(0.5, 0, 1, -10)
-	closeBtn.BorderSizePixel = 0
-	closeBtn.Text = "Close"
-	closeBtn.Font = Enum.Font.GothamBold
-	closeBtn.TextSize = 14
-	closeBtn.TextColor3 = Color3.fromRGB(245, 245, 245)
-	closeBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-	closeBtn.BackgroundTransparency = 0.2
-	closeBtn.Parent = statsPopup
-	makeCorner(closeBtn, 10)
-	makeStroke(closeBtn, 1, Color3.fromRGB(200, 40, 40), 0.25)
-
+	closeBtn.Size = UDim2.new(0, 140, 0, 34)
 	closeBtn.MouseButton1Click:Connect(function()
 		statsPopup.Visible = false
 	end)
@@ -548,6 +601,15 @@ local function trySendChat(text)
 	return false
 end
 
+local function maybeSendPrimaryForExecuted(uid)
+	if typeof(uid) ~= "number" then return end
+	if uid == LocalPlayer.UserId then return end
+	if SentPrimaryForExecutedUserId[uid] then return end
+
+	SentPrimaryForExecutedUserId[uid] = true
+	trySendChat(SOS_MARKER_PRIMARY) -- send ¬
+end
+
 local function hookChatListeners()
 	-- TextChatService listener
 	if TextChatService and TextChatService.MessageReceived then
@@ -558,12 +620,22 @@ local function hookChatListeners()
 			if not src or not src.UserId then return end
 
 			local uid = src.UserId
+
+			-- Existing SOS markers (tag logic unchanged)
 			if text == SOS_MARKER_PRIMARY or text == SOS_MARKER_JOINER then
 				onSosSeen(uid)
 				return
 			end
+
+			-- Existing AK markers (tag logic unchanged)
 			if text == AK_MARKER_1 or text == AK_MARKER_2 then
 				onAkSeen(uid)
+				return
+			end
+
+			-- New: executed symbol triggers our ¬ reply (only for other people)
+			if text == EXECUTED_SYMBOL then
+				maybeSendPrimaryForExecuted(uid)
 				return
 			end
 		end)
@@ -577,6 +649,8 @@ local function hookChatListeners()
 					onSosSeen(plr.UserId)
 				elseif message == AK_MARKER_1 or message == AK_MARKER_2 then
 					onAkSeen(plr.UserId)
+				elseif message == EXECUTED_SYMBOL then
+					maybeSendPrimaryForExecuted(plr.UserId)
 				end
 			end)
 		end)
@@ -590,6 +664,22 @@ end
 
 local function init()
 	ensureStatsPopup()
+	ensureBroadcastPanel()
+
+	-- Wire broadcast buttons (UI only)
+	if broadcastSOS then
+		broadcastSOS.MouseButton1Click:Connect(function()
+			onSosSeen(LocalPlayer.UserId)
+			trySendChat(SOS_MARKER_PRIMARY) -- ¬
+		end)
+	end
+
+	if broadcastAK then
+		broadcastAK.MouseButton1Click:Connect(function()
+			onAkSeen(LocalPlayer.UserId)
+			trySendChat(AK_MARKER_1) -- ؍؍؍
+		end)
+	end
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		hookPlayer(plr)
@@ -605,7 +695,7 @@ local function init()
 		end
 	end
 
-	-- Broadcast on startup
+	-- Broadcast on startup (unchanged behavior: you broadcast your normal markers)
 	onSosSeen(LocalPlayer.UserId)
 	onAkSeen(LocalPlayer.UserId)
 	trySendChat(SOS_MARKER_PRIMARY)
