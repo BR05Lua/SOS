@@ -3,23 +3,18 @@
 	Single LocalScript
 	Put this LocalScript in StarterPlayerScripts so it auto loads every time you join
 
-	This build:
-	- SOS marker is ¬ (only this means SOS)
-	- AK marker is ؍؍؍ or ؍ (AK is independent and does NOT make someone an SOS user)
-	- KSK marker is ,,κžκåçţíѷåţíѷåţȇđ,, (independent)
-	- Tags are independent but still share the same chat listener system
-	- Separate BillboardGui per tag type:
-		1) SOS role tag (Owner, Sin, Tester, SOS User) only appears if they used SOS marker (¬), except Owners always show
-		2) AK tag is a small circle with "AK"
-		3) KSK tag is a small circle with "KSK"
-	- Clicking tags:
-		- Normal click teleports you behind them by 5 studs
-		- Hold LeftCtrl then click shows a small stats popup for that player
-	- All tag text is centered
-	- Tags are about 30 percent smaller
-	- Owner tag is glitchy neon yellow text with dark black glass background
+	NOTE:
+	- KSK system has been REMOVED entirely (per request) to stop malformed string / paste corruption issues.
+	- SOS system stays the same: ¬ (executor) and • (joiner)
+	- AK system stays the same: ؍؍؍ or ؍
 
-	(No remote events added by this script beyond Roblox default chat systems)
+	Tags:
+	- Click tag to teleport behind target by 5 studs
+	- Hold LeftCtrl + click to show safe client-side stats (AccountAge etc)
+
+	Owner rules:
+	- Owners can broadcast triggers
+	- Owners must never display AK elements on their own tag
 ]]
 
 --------------------------------------------------------------------
@@ -68,8 +63,10 @@ local velocityLerpRate = 7.0
 local rotationLerpRate = 7.0
 local idleSlowdownRate = 2.6
 
-local MOVING_TILT_DEG = 85
-local IDLE_TILT_DEG = 10
+-- New tilt behavior settings
+local UP_TILT_DEG = 20
+local SIDE_TILT_DEG = 18
+local DOWN_TILT_DEG = 90
 
 local MOBILE_FLY_POS = UDim2.new(1, -170, 1, -190)
 local MOBILE_FLY_SIZE = UDim2.new(0, 140, 0, 60)
@@ -147,7 +144,6 @@ local DEFAULT_WALKSPEED = nil
 local playerSpeed = nil
 
 -- Camera settings
--- Keep CameraSubject = Humanoid always to preserve Shift Lock
 local camAttachMode = "Humanoid"
 local camOffset = Vector3.new(0, 0, 0)
 local camFov = nil
@@ -179,7 +175,10 @@ local clickSoundTemplate = nil
 local buttonSoundAttached = setmetatable({}, { __mode = "k" })
 
 -- Save debounce
-local pendingSave = true
+local pendingSave = false
+
+-- UI: menu switch function pointer (set in createUI)
+local uiSetMenu = nil
 
 --------------------------------------------------------------------
 -- HELPERS
@@ -744,7 +743,7 @@ local function startFlying()
 	camLook = camLook.Unit
 
 	local baseCF = CFrame.lookAt(rootPart.Position, rootPart.Position + camLook)
-	currentGyroCFrame = baseCF * CFrame.Angles(-math.rad(IDLE_TILT_DEG), 0, 0)
+	currentGyroCFrame = baseCF * CFrame.Angles(0, 0, 0)
 	bodyGyro.CFrame = currentGyroCFrame
 
 	animMode = "Float"
@@ -909,7 +908,9 @@ local function getAttachOffset(mode)
 	end
 
 	local head = character:FindFirstChild("Head")
-	if not head or not head:IsA("BasePart") then
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	local adorneePart = head or hrp
+	if not adorneePart or not adorneePart:IsA("BasePart") then
 		return Vector3.new(0, 0, 0)
 	end
 
@@ -917,7 +918,7 @@ local function getAttachOffset(mode)
 	if mode == "Head" then
 		part = head
 	elseif mode == "HumanoidRootPart" then
-		part = character:FindFirstChild("HumanoidRootPart")
+		part = hrp
 	elseif mode == "Torso" then
 		part = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
 	elseif mode == "UpperTorso" then
@@ -930,7 +931,7 @@ local function getAttachOffset(mode)
 		return Vector3.new(0, 0, 0)
 	end
 
-	local worldDelta = (part.Position - head.Position)
+	local worldDelta = (part.Position - adorneePart.Position)
 	if rootPart and rootPart:IsA("BasePart") then
 		return rootPart.CFrame:VectorToObjectSpace(worldDelta)
 	end
@@ -977,7 +978,7 @@ local function playStartSound()
 end
 
 --------------------------------------------------------------------
--- TAG SYSTEM (SOS, AK, KSK) - independent
+-- TAG SYSTEM (SOS, AK) - KSK REMOVED
 --------------------------------------------------------------------
 local ROLE_COLOR = {
 	Normal = Color3.fromRGB(120, 190, 235),
@@ -996,7 +997,6 @@ local OwnerUserIds = {
 }
 
 local TesterUserIds = {
-	-- leave blank for now
 }
 
 local SinProfiles = {
@@ -1009,24 +1009,20 @@ local SinProfiles = {
 	[1575141882] = { SinName = "Heart", Color = Color3.fromRGB(255, 120, 210) },
 }
 
-local SOS_MARKER = "𖺗"
+local SOS_MARKER_EXECUTOR = "¬"
+local SOS_MARKER_JOINER = "•"
 local AK_MARKER_1 = "؍؍؍"
 local AK_MARKER_2 = "؍"
-local KSK_MARKER = ",,κžκåçţíѷåţíѷåţȇđ,,"
 
--- independent sets
 local SosUsers = {}
 local AkUsers = {}
-local KskUsers = {}
 
--- tag sizing (about 30 percent smaller than old)
 local TAG_W, TAG_H = 144, 36
 local TAG_OFFSET_Y = 2.6
 
 local ORB_SIZE = 18
 local ORB_OFFSET_Y = 3.35
 
--- quick stats popup
 local statsPopup
 local statsPopupLabel
 local statsPopupClose
@@ -1037,25 +1033,18 @@ end
 
 local function getSosRole(plr)
 	if not plr then return nil end
-
-	-- owners always have their SOS role tag
 	if isOwner(plr) then
 		return "Owner"
 	end
-
-	-- SOS role tags only appear if they used SOS marker
 	if not SosUsers[plr.UserId] then
 		return nil
 	end
-
 	if TesterUserIds[plr.UserId] then
 		return "Tester"
 	end
-
 	if SinProfiles[plr.UserId] then
 		return "Sin"
 	end
-
 	return "Normal"
 end
 
@@ -1119,7 +1108,7 @@ local function ensureStatsPopup()
 	statsPopup.Name = "SOS_StatsPopup"
 	statsPopup.AnchorPoint = Vector2.new(0.5, 0.5)
 	statsPopup.Position = UDim2.new(0.5, 0, 0.5, 0)
-	statsPopup.Size = UDim2.new(0, 380, 0, 170)
+	statsPopup.Size = UDim2.new(0, 380, 0, 160)
 	statsPopup.BorderSizePixel = 0
 	statsPopup.Visible = false
 	statsPopup.Parent = gui
@@ -1145,7 +1134,7 @@ local function ensureStatsPopup()
 	statsPopupClose.Position = UDim2.new(0.5, 0, 1, -10)
 	statsPopupClose.Size = UDim2.new(0, 140, 0, 34)
 	statsPopupClose.MouseButton1Click:Connect(function()
-		statsPopup.Visible = true
+		statsPopup.Visible = false
 	end)
 end
 
@@ -1161,7 +1150,6 @@ local function showPlayerStats(plr)
 	local role = getSosRole(plr)
 	local roleLine = role and (getTopLine(plr, role)) or "No SOS role tag"
 	local akLine = AkUsers[plr.UserId] and "AK: Yes" or "AK: No"
-	local kskLine = KskUsers[plr.UserId] and "KSK: Yes" or "KSK: No"
 
 	local txt = ""
 	txt = txt .. "User: " .. plr.Name .. "\n"
@@ -1169,7 +1157,6 @@ local function showPlayerStats(plr)
 	txt = txt .. "AccountAge: " .. tostring(ageDays) .. " days\n\n"
 	txt = txt .. "SOS Role: " .. roleLine .. "\n"
 	txt = txt .. akLine .. "\n"
-	txt = txt .. kskLine .. "\n"
 
 	statsPopupLabel.Text = txt
 	statsPopup.Visible = true
@@ -1255,7 +1242,6 @@ local function createSosRoleTag(plr)
 	btn.Parent = bb
 	makeCorner(btn, 10)
 
-	-- Owner special styling
 	if role == "Owner" then
 		btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 		btn.BackgroundTransparency = 0.12
@@ -1330,32 +1316,14 @@ local function createSosRoleTag(plr)
 	makeTagButtonCommon(btn, plr)
 end
 
-local function createOrbTag(plr, kind)
+local function createAkOrbTag(plr)
 	if not plr then return end
 	local char = plr.Character
 	if not char then return end
 
-	local isOn = false
-	local orbName = ""
-	local orbText = ""
-	local orbColor = Color3.fromRGB(255, 60, 60)
-
-	if kind == "AK" then
-		isOn = (AkUsers[plr.UserId] == true)
-		orbName = "SOS_AKTag"
-		orbText = "AK"
-		orbColor = Color3.fromRGB(255, 60, 60)
-	elseif kind == "KSK" then
-		isOn = (KskUsers[plr.UserId] == true)
-		orbName = "SOS_KSKTag"
-		orbText = "KSK"
-		orbColor = Color3.fromRGB(80, 170, 255)
-	else
-		return
-	end
-
+	local isOn = (AkUsers[plr.UserId] == true)
 	if not isOn then
-		destroyTagGui(char, orbName)
+		destroyTagGui(char, "SOS_AKTag")
 		return
 	end
 
@@ -1364,10 +1332,10 @@ local function createOrbTag(plr, kind)
 	local adornee = (head and head:IsA("BasePart")) and head or ((hrp and hrp:IsA("BasePart")) and hrp or nil)
 	if not adornee then return end
 
-	destroyTagGui(char, orbName)
+	destroyTagGui(char, "SOS_AKTag")
 
 	local bb = Instance.new("BillboardGui")
-	bb.Name = orbName
+	bb.Name = "SOS_AKTag"
 	bb.Adornee = adornee
 	bb.AlwaysOnTop = true
 	bb.Size = UDim2.new(0, ORB_SIZE, 0, ORB_SIZE)
@@ -1378,13 +1346,13 @@ local function createOrbTag(plr, kind)
 	btn.Name = "ClickArea"
 	btn.Size = UDim2.new(1, 0, 1, 0)
 	btn.BorderSizePixel = 0
-	btn.Text = orbText
+	btn.Text = "AK"
 	btn.AutoButtonColor = true
 	btn.Font = Enum.Font.GothamBlack
-	btn.TextSize = (kind == "KSK") and 9 or 10
+	btn.TextSize = 10
 	btn.TextXAlignment = Enum.TextXAlignment.Center
 	btn.TextYAlignment = Enum.TextYAlignment.Center
-	btn.TextColor3 = orbColor
+	btn.TextColor3 = Color3.fromRGB(255, 60, 60)
 	btn.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
 	btn.BackgroundTransparency = 0.12
 	btn.Parent = bb
@@ -1402,8 +1370,7 @@ end
 local function refreshAllTagsForPlayer(plr)
 	if not plr or not plr.Character then return end
 	createSosRoleTag(plr)
-	createOrbTag(plr, "AK")
-	createOrbTag(plr, "KSK")
+	createAkOrbTag(plr)
 end
 
 local function hookPlayerForTags(plr)
@@ -1440,19 +1407,7 @@ local function onAkSeen(userId)
 	end
 end
 
-local function onKskSeen(userId)
-	if typeof(userId) ~= "number" then return end
-	KskUsers[userId] = true
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.UserId == userId then
-			refreshAllTagsForPlayer(plr)
-			break
-		end
-	end
-end
-
 local function trySendChat(text)
-	-- TextChatService path
 	local ok = pcall(function()
 		if TextChatService and TextChatService.TextChannels then
 			local general = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
@@ -1467,7 +1422,6 @@ local function trySendChat(text)
 		return true
 	end
 
-	-- Legacy default chat events path
 	local ok2 = pcall(function()
 		local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
 		if events then
@@ -1484,7 +1438,10 @@ end
 
 local function broadcastSosMarker()
 	onSosSeen(LocalPlayer.UserId)
-	trySendChat(SOS_MARKER)
+	trySendChat(SOS_MARKER_EXECUTOR)
+	task.delay(0.15, function()
+		trySendChat(SOS_MARKER_JOINER)
+	end)
 end
 
 local function broadcastAkMarker()
@@ -1492,23 +1449,16 @@ local function broadcastAkMarker()
 	trySendChat(AK_MARKER_1)
 end
 
-local function broadcastKskMarker()
-	onKskSeen(LocalPlayer.UserId)
-	trySendChat(KSK_MARKER)
-end
-
 local function hookChatListeners()
-	-- TextChatService listener
 	if TextChatService and TextChatService.MessageReceived then
 		TextChatService.MessageReceived:Connect(function(msg)
 			if not msg then return end
 			local text = msg.Text or ""
 			local src = msg.TextSource
-
 			if not src or not src.UserId then return end
 			local uid = src.UserId
 
-			if text == SOS_MARKER then
+			if text == SOS_MARKER_EXECUTOR or text == SOS_MARKER_JOINER then
 				onSosSeen(uid)
 				return
 			end
@@ -1517,24 +1467,16 @@ local function hookChatListeners()
 				onAkSeen(uid)
 				return
 			end
-
-			if text == KSK_MARKER then
-				onKskSeen(uid)
-				return
-			end
 		end)
 	end
 
-	-- Player.Chatted fallback
 	for _, plr in ipairs(Players:GetPlayers()) do
 		pcall(function()
 			plr.Chatted:Connect(function(message)
-				if message == SOS_MARKER then
+				if message == SOS_MARKER_EXECUTOR or message == SOS_MARKER_JOINER then
 					onSosSeen(plr.UserId)
 				elseif message == AK_MARKER_1 or message == AK_MARKER_2 then
 					onAkSeen(plr.UserId)
-				elseif message == KSK_MARKER then
-					onKskSeen(plr.UserId)
 				end
 			end)
 		end)
@@ -1543,17 +1485,179 @@ local function hookChatListeners()
 	Players.PlayerAdded:Connect(function(plr)
 		pcall(function()
 			plr.Chatted:Connect(function(message)
-				if message == SOS_MARKER then
+				if message == SOS_MARKER_EXECUTOR or message == SOS_MARKER_JOINER then
 					onSosSeen(plr.UserId)
 				elseif message == AK_MARKER_1 or message == AK_MARKER_2 then
 					onAkSeen(plr.UserId)
-				elseif message == KSK_MARKER then
-					onKskSeen(plr.UserId)
 				end
 			end)
 		end)
 	end)
 end
+--------------------------------------------------------------------
+-- OWNER RULE
+-- Owners can broadcast triggers, but Owner must never display AK elements on their own tag.
+--------------------------------------------------------------------
+local function enforceOwnerNoAk(plr)
+	if not plr then return end
+	if isOwner(plr) then
+		AkUsers[plr.UserId] = nil
+		if plr.Character then
+			destroyTagGui(plr.Character, "SOS_AKTag")
+		end
+	end
+end
+
+local function refreshAllTagsForPlayerWithOwnerRule(plr)
+	enforceOwnerNoAk(plr)
+	refreshAllTagsForPlayer(plr)
+	enforceOwnerNoAk(plr)
+end
+
+do
+	local oldRefresh = refreshAllTagsForPlayer
+	refreshAllTagsForPlayer = function(plr)
+		refreshAllTagsForPlayerWithOwnerRule(plr)
+	end
+end
+
+--------------------------------------------------------------------
+-- FPS UPDATE
+--------------------------------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+	fpsAcc = fpsAcc + dt
+	fpsFrames = fpsFrames + 1
+	if fpsAcc >= 0.5 then
+		fpsValue = math.floor((fpsFrames / fpsAcc) + 0.5)
+		fpsAcc = 0
+		fpsFrames = 0
+	end
+
+	if fpsLabel and fpsLabel.Parent then
+		fpsLabel.Text = tostring(fpsValue) .. " fps"
+		rainbowHue = (rainbowHue + dt * 0.12) % 1
+		if fpsValue < 35 then
+			fpsLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+		elseif fpsValue < 55 then
+			fpsLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
+		else
+			fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+		end
+	end
+end)
+
+--------------------------------------------------------------------
+-- INPUT: KEYBINDS + FLIGHT MOVE
+--------------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+	if input.KeyCode == menuToggleKey then
+		if uiSetMenu then
+			uiSetMenu(not menuOpen, false)
+		end
+	end
+
+	if input.KeyCode == flightToggleKey then
+		if flying then
+			stopFlying()
+			notify("Flight", "Disabled", 2)
+		else
+			startFlying()
+			notify("Flight", "Enabled", 2)
+		end
+	end
+end)
+
+--------------------------------------------------------------------
+-- FLIGHT: SPEED CONTROL
+--------------------------------------------------------------------
+UserInputService.InputChanged:Connect(function(input, gp)
+	if gp then return end
+	if input.UserInputType == Enum.UserInputType.MouseWheel then
+		if flying then
+			local delta = input.Position.Z
+			if delta > 0 then
+				flySpeed = math.clamp(flySpeed + 15, minFlySpeed, maxFlySpeed)
+			else
+				flySpeed = math.clamp(flySpeed - 15, minFlySpeed, maxFlySpeed)
+			end
+			scheduleSave()
+			notify("Flight", "Speed: " .. tostring(flySpeed), 1.5)
+		end
+	end
+end)
+
+--------------------------------------------------------------------
+-- FLIGHT: UPDATE LOOP (tilt rules added)
+--------------------------------------------------------------------
+RunService.Heartbeat:Connect(function(dt)
+	if not flying then return end
+	if not humanoid or not rootPart or not bodyGyro or not bodyVel then return end
+
+	updateMovementInput()
+
+	local camCF = camera and camera.CFrame or rootPart.CFrame
+	local forward = camCF.LookVector
+	local right = camCF.RightVector
+
+	local desired = (forward * (-moveInput.Z)) + (right * (moveInput.X))
+	if desired.Magnitude > 1 then
+		desired = desired.Unit
+	end
+
+	local desiredVel = desired * flySpeed + Vector3.new(0, verticalInput * flySpeed, 0)
+
+	local lerpA = clamp01(dt * velocityLerpRate)
+	currentVelocity = currentVelocity:Lerp(desiredVel, lerpA)
+
+	if desiredVel.Magnitude < 0.5 then
+		currentVelocity = currentVelocity:Lerp(Vector3.new(0, 0, 0), clamp01(dt * idleSlowdownRate))
+	end
+
+	bodyVel.Velocity = currentVelocity
+
+	local planarSpeed = Vector3.new(currentVelocity.X, 0, currentVelocity.Z).Magnitude
+	local now = time()
+	if now - lastAnimSwitch > ANIM_SWITCH_COOLDOWN then
+		if animMode == "Float" and planarSpeed > (flySpeed * ANIM_TO_FLY_THRESHOLD) then
+			animMode = "Fly"
+			lastAnimSwitch = now
+			playFly()
+		elseif animMode == "Fly" and planarSpeed < (flySpeed * ANIM_TO_FLOAT_THRESHOLD) then
+			animMode = "Float"
+			lastAnimSwitch = now
+			playFloat()
+		end
+	end
+
+	local tiltPitch = 0
+	local tiltRoll = 0
+
+	if verticalInput < 0 then
+		tiltPitch = math.rad(DOWN_TILT_DEG)
+	elseif verticalInput > 0 then
+		tiltPitch = math.rad(-UP_TILT_DEG)
+	else
+		tiltPitch = 0
+	end
+
+	if moveInput.X < 0 then
+		tiltRoll = math.rad(-SIDE_TILT_DEG)
+	elseif moveInput.X > 0 then
+		tiltRoll = math.rad(SIDE_TILT_DEG)
+	else
+		tiltRoll = 0
+	end
+
+	local baseLook = CFrame.lookAt(rootPart.Position, rootPart.Position + camCF.LookVector)
+	local targetCF = baseLook * CFrame.Angles(tiltPitch, 0, tiltRoll)
+
+	local rotL = clamp01(dt * rotationLerpRate)
+	currentGyroCFrame = currentGyroCFrame:Lerp(targetCF, rotL)
+	bodyGyro.CFrame = currentGyroCFrame
+end)
 
 --------------------------------------------------------------------
 -- UI: BUILD
@@ -1574,7 +1678,6 @@ local function createUI()
 
 	ensureStatsPopup()
 
-	-- FPS label
 	fpsLabel = Instance.new("TextLabel")
 	fpsLabel.Name = "FPS"
 	fpsLabel.BackgroundTransparency = 1
@@ -1589,7 +1692,6 @@ local function createUI()
 	fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
 	fpsLabel.Parent = gui
 
-	-- Handle
 	menuHandle = Instance.new("Frame")
 	menuHandle.Name = "MenuHandle"
 	menuHandle.AnchorPoint = Vector2.new(0.5, 0)
@@ -1623,7 +1725,6 @@ local function createUI()
 	title.TextXAlignment = Enum.TextXAlignment.Center
 	title.Parent = menuHandle
 
-	-- Menu frame
 	menuFrame = Instance.new("Frame")
 	menuFrame.Name = "Menu"
 	menuFrame.AnchorPoint = Vector2.new(0.5, 0)
@@ -1635,7 +1736,6 @@ local function createUI()
 	makeGlass(menuFrame)
 	makeStroke(menuFrame, 2)
 
-	-- Tabs bar
 	tabsBar = Instance.new("ScrollingFrame")
 	tabsBar.Name = "TabsBar"
 	tabsBar.BackgroundTransparency = 1
@@ -1654,7 +1754,6 @@ local function createUI()
 	tabsLayout.Padding = UDim.new(0, 10)
 	tabsLayout.Parent = tabsBar
 
-	-- Pages holder
 	pagesHolder = Instance.new("Frame")
 	pagesHolder.Name = "PagesHolder"
 	pagesHolder.BackgroundTransparency = 1
@@ -1725,7 +1824,7 @@ local function createUI()
 		header.Size = UDim2.new(1, 0, 0, 22)
 
 		local msg = makeText(infoScroll,
-			"Discord:\nPress to copy, or it will open if copy isn't supported.\n\nTag Markers:\nSOS is ¬\nAK is ؍؍؍ or ؍\nKSK is ,,κžκåçţíѷåţíѷåţȇđ,,\n\nTags are independent.\nClick tag to teleport behind.\nHold LeftCtrl then click for stats.\n\nIf this breaks, it was definitely not my fault. Probably ping.",
+			"Discord:\nPress to copy, or it will open if copy isn't supported.\n\nTag Markers:\nSOS is ¬ (executor) and • (joiner)\nAK is ؍؍؍ or ؍\n\nTags are independent.\nClick tag to teleport behind.\nHold LeftCtrl then click for stats.\n\nIf this breaks, it was definitely not my fault. Probably ping.",
 			14, false
 		)
 		msg.Size = UDim2.new(1, 0, 0, 220)
@@ -1775,7 +1874,7 @@ local function createUI()
 		header.Size = UDim2.new(1, 0, 0, 22)
 
 		local info = makeText(controlsScroll,
-			"PC:\n- Fly Toggle: " .. flightToggleKey.Name .. "\n- Menu Toggle: " .. menuToggleKey.Name .. "\n- Move: WASD + Q/E\n\nTags:\n- Click: teleport behind\n- LeftCtrl + Click: stats popup\n\nMarkers:\n- SOS: ¬\n- AK: ؍؍؍ or ؍\n- KSK: ,,κžκåçţíѷåţíѷåţȇđ,,",
+			"PC:\n- Fly Toggle: " .. flightToggleKey.Name .. "\n- Menu Toggle: " .. menuToggleKey.Name .. "\n- Move: WASD + Q/E\n\nTags:\n- Click: teleport behind\n- LeftCtrl + Click: stats popup\n\nMarkers:\n- SOS: ¬ (executor) and • (joiner)\n- AK: ؍؍؍ or ؍",
 			14, false
 		)
 		info.Size = UDim2.new(1, 0, 0, 220)
@@ -1833,11 +1932,11 @@ local function createUI()
 		lay.Padding = UDim.new(0, 10)
 		lay.Parent = row
 
-		local sosBtn = makeButton(row, "Broadcast SOS (¬)")
+		local sosBtn = makeButton(row, "Broadcast SOS (¬+•)")
 		sosBtn.Size = UDim2.new(0, 180, 0, 36)
 		sosBtn.MouseButton1Click:Connect(function()
 			broadcastSosMarker()
-			notify("Tags", "Sent SOS marker.", 2)
+			notify("Tags", "Sent SOS markers.", 2)
 		end)
 
 		local akBtn = makeButton(row, "Broadcast AK (؍؍؍)")
@@ -1846,17 +1945,10 @@ local function createUI()
 			broadcastAkMarker()
 			notify("Tags", "Sent AK marker.", 2)
 		end)
-
-		local kskBtn = makeButton(row, "Broadcast KSK")
-		kskBtn.Size = UDim2.new(0, 140, 0, 36)
-		kskBtn.MouseButton1Click:Connect(function()
-			broadcastKskMarker()
-			notify("Tags", "Sent KSK marker.", 2)
-		end)
 	end
 
 	----------------------------------------------------------------
-	-- FLY TAB (kept)
+	-- FLY TAB
 	----------------------------------------------------------------
 	do
 		local header = makeText(flyScroll, "Flight Emotes", 16, true)
@@ -1893,7 +1985,7 @@ local function createUI()
 			resetBtn.AnchorPoint = Vector2.new(1, 0)
 			resetBtn.Position = UDim2.new(1, -10, 0, 4)
 
-			applyBtn.MouseButton1Click:Connect(function()
+			local function applyFromBox()
 				local parsed = toAssetIdString(box.Text)
 				if not parsed then
 					notify("Flight Emotes", "Invalid ID. Use rbxassetid://123 or just 123", 3)
@@ -1907,6 +1999,10 @@ local function createUI()
 				end
 				scheduleSave()
 				notify("Flight Emotes", "Applied.", 2)
+			end
+
+			applyBtn.MouseButton1Click:Connect(function()
+				applyFromBox()
 			end)
 
 			resetBtn.MouseButton1Click:Connect(function()
@@ -1924,6 +2020,958 @@ local function createUI()
 
 		makeIdRow("FLOAT_ID:", function() return FLOAT_ID end, function(v) FLOAT_ID = v end, function() FLOAT_ID = DEFAULT_FLOAT_ID end)
 		makeIdRow("FLY_ID:", function() return FLY_ID end, function(v) FLY_ID = v end, function() FLY_ID = DEFAULT_FLY_ID end)
+	end
+
+	----------------------------------------------------------------
+	-- ANIM PACKS TAB (Roblox Anims / Unreleased / Custom Anims)
+	----------------------------------------------------------------
+	do
+		local header = makeText(animScroll, "Anim Packs", 16, true)
+		header.Size = UDim2.new(1, 0, 0, 22)
+
+		local info = makeText(animScroll,
+			"Pick a State, pick a Category, then click an animation button.\nOverrides reapply on respawn.\n\nIf a game is stubborn and overwrites Animate, click Reapply All.",
+			13, false
+		)
+		info.TextColor3 = Color3.fromRGB(220, 220, 220)
+		info.Size = UDim2.new(1, 0, 0, 86)
+
+		local customIdles = {
+			{ Name = "Jonathan", Id = "rbxassetid://120629563851640" },
+			{ Name = "Killer Queen", Id = "rbxassetid://104714163485875" },
+			{ Name = "Dio", Id = "rbxassetid://138467089338692" },
+			{ Name = "Dio OH", Id = "rbxassetid://96658788627102" },
+			{ Name = "Joseph", Id = "rbxassetid://87470625500564" },
+			{ Name = "Jolyne", Id = "rbxassetid://97892708412696" },
+			{ Name = "Diego", Id = "rbxassetid://127117233320016" },
+			{ Name = "Polnareff", Id = "rbxassetid://104647713661701" },
+			{ Name = "Jotaro", Id = "rbxassetid://134878791451155" },
+			{ Name = "Funny V", Id = "rbxassetid://88859285630202" },
+			{ Name = "Johnny", Id = "rbxassetid://77834689346843" },
+			{ Name = "Made in Heaven", Id = "rbxassetid://79234770032233" },
+			{ Name = "Mahito", Id = "rbxassetid://92585001378279" },
+			{ Name = "Honored One", Id = "rbxassetid://139000839803032" },
+			{ Name = "Gon Rage", Id = "rbxassetid://136678571910037" },
+			{ Name = "Sol's RNG 1", Id = "rbxassetid://125722696765151" },
+			{ Name = "Luffy", Id = "rbxassetid://107520488394848" },
+			{ Name = "Sans", Id = "rbxassetid://123627677663418" },
+			{ Name = "Fake R6", Id = "rbxassetid://96518514398708" },
+			{ Name = "Goku Warm Up", Id = "rbxassetid://84773442399798" },
+			{ Name = "Goku UI/Mui", Id = "rbxassetid://130104867308995" },
+			{ Name = "Goku Black", Id = "rbxassetid://110240143520283" },
+			{ Name = "Sukuna", Id = "rbxassetid://82974857632552" },
+			{ Name = "Toji", Id = "rbxassetid://113657065279101" },
+			{ Name = "Isagi", Id = "rbxassetid://135818607077529" },
+			{ Name = "Yuji", Id = "rbxassetid://103088653217891" },
+			{ Name = "Lavinho", Id = "rbxassetid://92045987196732" },
+			{ Name = "Ippo", Id = "rbxassetid://76110924880592" },
+			{ Name = "Aizen", Id = "rbxassetid://83896268225208" },
+			{ Name = "Kaneki", Id = "rbxassetid://116671111363578" },
+			{ Name = "Tanjiro", Id = "rbxassetid://118533315464114" },
+			{ Name = "Head Hold", Id = "rbxassetid://129453036635884" },
+			{ Name = "Samurai", Id = "rbxassetid://114305981386041" },
+			{ Name = "Robot Perform", Id = "rbxassetid://105174189783870" },
+			{ Name = "Robot Speed 3", Id = "rbxassetid://128047975332475" },
+			{ Name = "Springtrap", Id = "rbxassetid://90257184304714" },
+			{ Name = "Hmmm Float", Id = "rbxassetid://107666091494733" },
+			{ Name = "OG Golden Freddy", Id = "rbxassetid://138402679058341" },
+			{ Name = "Wally West", Id = "rbxassetid://106169111259587" },
+			{ Name = "𝓛", Id = "rbxassetid://103267638009024" },
+			{ Name = "Robot Malfunction", Id = "rbxassetid://110419039625879" },
+			{ Name = "A Vibing Spider", Id = "rbxassetid://86005347720103" },
+			{ Name = "Spiderman", Id = "rbxassetid://74785222555193" },
+		}
+
+		local customRuns = {
+			{ Name = "Tall", Id = "rbxassetid://134010853417610" },
+			{ Name = "Officer Earl", Id = "rbxassetid://104646820775114" },
+			{ Name = "AOT Titan", Id = "rbxassetid://95363958550738" },
+			{ Name = "TF2", Id = "rbxassetid://122588181027551" },
+			{ Name = "Captain JS", Id = "rbxassetid://87806542116815" },
+			{ Name = "Ninja Sprint", Id = "rbxassetid://123763532572423" },
+			{ Name = "IDEK", Id = "rbxassetid://101293881003047" },
+			{ Name = "Honored One", Id = "rbxassetid://82260970223217" },
+			{ Name = "Head Hold", Id = "rbxassetid://92715775326925" },
+			{ Name = "Springtrap Sturdy", Id = "rbxassetid://80927378599036" },
+			{ Name = "UFO", Id = "rbxassetid://118703314621593" },
+			{ Name = "Closed Eyes Vibe", Id = "rbxassetid://117991470645633" },
+			{ Name = "Wally West", Id = "rbxassetid://102622695004986" },
+			{ Name = "Squidward", Id = "rbxassetid://82365330773489" },
+			{ Name = "On A Mission", Id = "rbxassetid://113718116290824" },
+			{ Name = "Very Happy Run", Id = "rbxassetid://86522070222739" },
+			{ Name = "Missile", Id = "rbxassetid://92401041987431" },
+			{ Name = "I Wanna Run Away", Id = "rbxassetid://78510387198062" },
+			{ Name = "A Spider", Id = "rbxassetid://89356423918695" },
+		}
+
+		local categories = { "Roblox Anims", "Unreleased", "Custom Anims" }
+		if not lastChosenCategory or lastChosenCategory == "" then
+			lastChosenCategory = "Custom Anims"
+		end
+
+		local stateRow = Instance.new("Frame")
+		stateRow.BackgroundTransparency = 1
+		stateRow.Size = UDim2.new(1, 0, 0, 44)
+		stateRow.Parent = animScroll
+
+		local stateLayout = Instance.new("UIListLayout")
+		stateLayout.FillDirection = Enum.FillDirection.Horizontal
+		stateLayout.Padding = UDim.new(0, 10)
+		stateLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		stateLayout.Parent = stateRow
+
+		local stateButtons = {}
+		local states = { "Idle", "Walk", "Run", "Jump", "Climb", "Fall", "Swim" }
+
+		local function setSelectedState(stateName)
+			lastChosenState = stateName
+			for _, s in ipairs(states) do
+				local b = stateButtons[s]
+				if b then
+					setTabButtonActive(b, s == stateName)
+				end
+			end
+			scheduleSave()
+		end
+
+		for _, s in ipairs(states) do
+			local b = makeButton(stateRow, s)
+			b.Size = UDim2.new(0, 74, 0, 36)
+			stateButtons[s] = b
+			b.MouseButton1Click:Connect(function()
+				setSelectedState(s)
+			end)
+		end
+		setSelectedState(lastChosenState or "Idle")
+
+		local catRow = Instance.new("Frame")
+		catRow.BackgroundTransparency = 1
+		catRow.Size = UDim2.new(1, 0, 0, 44)
+		catRow.Parent = animScroll
+
+		local catLayout = Instance.new("UIListLayout")
+		catLayout.FillDirection = Enum.FillDirection.Horizontal
+		catLayout.Padding = UDim.new(0, 10)
+		catLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		catLayout.Parent = catRow
+
+		local catButtons = {}
+
+		local function setSelectedCategory(catName)
+			lastChosenCategory = catName
+			for _, c in ipairs(categories) do
+				local b = catButtons[c]
+				if b then
+					setTabButtonActive(b, c == catName)
+				end
+			end
+			scheduleSave()
+		end
+
+		for _, c in ipairs(categories) do
+			local b = makeButton(catRow, c)
+			b.Size = UDim2.new(0, (c == "Custom Anims") and 160 or 140, 0, 36)
+			catButtons[c] = b
+			b.MouseButton1Click:Connect(function()
+				setSelectedCategory(c)
+			end)
+		end
+		setSelectedCategory(lastChosenCategory)
+
+		local currentLabel = makeText(animScroll, "", 13, true)
+		currentLabel.TextColor3 = Color3.fromRGB(245, 245, 245)
+		currentLabel.Size = UDim2.new(1, 0, 0, 22)
+
+		local function updateCurrentLabel()
+			local v = stateOverrides[lastChosenState]
+			if v then
+				currentLabel.Text = "Current " .. lastChosenState .. ": " .. tostring(v)
+			else
+				currentLabel.Text = "Current " .. lastChosenState .. ": (default)"
+			end
+		end
+		updateCurrentLabel()
+
+		local toolRow = Instance.new("Frame")
+		toolRow.BackgroundTransparency = 1
+		toolRow.Size = UDim2.new(1, 0, 0, 44)
+		toolRow.Parent = animScroll
+
+		local toolLay = Instance.new("UIListLayout")
+		toolLay.FillDirection = Enum.FillDirection.Horizontal
+		toolLay.Padding = UDim.new(0, 10)
+		toolLay.VerticalAlignment = Enum.VerticalAlignment.Center
+		toolLay.Parent = toolRow
+
+		local clearBtn = makeButton(toolRow, "Clear Override")
+		clearBtn.Size = UDim2.new(0, 160, 0, 36)
+
+		local reapplyBtn = makeButton(toolRow, "Reapply All")
+		reapplyBtn.Size = UDim2.new(0, 160, 0, 36)
+
+		local clearAllBtn = makeButton(toolRow, "Clear All")
+		clearAllBtn.Size = UDim2.new(0, 140, 0, 36)
+
+		clearBtn.MouseButton1Click:Connect(function()
+			stateOverrides[lastChosenState] = nil
+			updateCurrentLabel()
+			scheduleSave()
+			notify("Anim Packs", "Cleared " .. lastChosenState .. " override.", 2)
+		end)
+
+		reapplyBtn.MouseButton1Click:Connect(function()
+			reapplyAllOverridesAfterRespawn()
+			notify("Anim Packs", "Reapplied overrides.", 2)
+		end)
+
+		clearAllBtn.MouseButton1Click:Connect(function()
+			for k, _ in pairs(stateOverrides) do
+				stateOverrides[k] = nil
+			end
+			updateCurrentLabel()
+			scheduleSave()
+			notify("Anim Packs", "Cleared all overrides.", 2)
+		end)
+
+		local gridHolder = Instance.new("Frame")
+		gridHolder.BackgroundTransparency = 1
+		gridHolder.Size = UDim2.new(1, 0, 0, 260)
+		gridHolder.Parent = animScroll
+
+		local gridBg = Instance.new("Frame")
+		gridBg.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+		gridBg.BackgroundTransparency = 0.25
+		gridBg.BorderSizePixel = 0
+		gridBg.Size = UDim2.new(1, 0, 1, 0)
+		gridBg.Parent = gridHolder
+		makeCorner(gridBg, 12)
+
+		local gridScroll = Instance.new("ScrollingFrame")
+		gridScroll.Name = "PresetGrid"
+		gridScroll.BackgroundTransparency = 1
+		gridScroll.BorderSizePixel = 0
+		gridScroll.Size = UDim2.new(1, 0, 1, 0)
+		gridScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		gridScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		gridScroll.ScrollBarThickness = 4
+		gridScroll.Parent = gridBg
+
+		local gridPad = Instance.new("UIPadding")
+		gridPad.PaddingTop = UDim.new(0, 10)
+		gridPad.PaddingBottom = UDim.new(0, 10)
+		gridPad.PaddingLeft = UDim.new(0, 10)
+		gridPad.PaddingRight = UDim.new(0, 10)
+		gridPad.Parent = gridScroll
+
+		local grid = Instance.new("UIGridLayout")
+		grid.CellSize = UDim2.new(0, 160, 0, 34)
+		grid.CellPadding = UDim2.new(0, 10, 0, 10)
+		grid.SortOrder = Enum.SortOrder.LayoutOrder
+		grid.Parent = gridScroll
+
+		local emptyLabel = Instance.new("TextLabel")
+		emptyLabel.BackgroundTransparency = 1
+		emptyLabel.Size = UDim2.new(1, -20, 0, 20)
+		emptyLabel.Position = UDim2.new(0, 10, 0, 10)
+		emptyLabel.Font = Enum.Font.Gotham
+		emptyLabel.TextSize = 13
+		emptyLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+		emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+		emptyLabel.TextYAlignment = Enum.TextYAlignment.Top
+		emptyLabel.Text = ""
+		emptyLabel.Visible = false
+		emptyLabel.Parent = gridBg
+
+		local function clearGrid()
+			for _, ch in ipairs(gridScroll:GetChildren()) do
+				if ch:IsA("TextButton") then
+					ch:Destroy()
+				end
+			end
+		end
+
+		local function applyPreset(assetIdStr)
+			if assetIdStr == "CLEAR_DEFAULT" then
+				stateOverrides[lastChosenState] = nil
+				updateCurrentLabel()
+				scheduleSave()
+				notify("Anim Packs", "Cleared " .. lastChosenState .. " override.", 2)
+				return
+			end
+
+			local ok = applyStateOverrideToAnimate(lastChosenState, assetIdStr)
+			if ok then
+				stateOverrides[lastChosenState] = assetIdStr
+				updateCurrentLabel()
+				scheduleSave()
+				notify("Anim Packs", "Applied to " .. lastChosenState .. ".", 2)
+			else
+				notify("Anim Packs", "Failed to apply. (No Animate script or invalid state mapping)", 3)
+			end
+		end
+
+		local function addPresetButton(name, idStr)
+			local b = makeButton(gridScroll, name)
+			b.TextSize = 13
+			b.MouseButton1Click:Connect(function()
+				applyPreset(idStr)
+			end)
+			return b
+		end
+
+		local function rebuildPresets()
+			clearGrid()
+			emptyLabel.Visible = false
+
+			addPresetButton("Default (Clear)", "CLEAR_DEFAULT")
+
+			if lastChosenCategory == "Custom Anims" then
+				if lastChosenState == "Idle" then
+					for _, e in ipairs(customIdles) do
+						addPresetButton(e.Name, e.Id)
+					end
+				elseif lastChosenState == "Run" then
+					for _, e in ipairs(customRuns) do
+						addPresetButton(e.Name, e.Id)
+					end
+				else
+					emptyLabel.Text = "Custom presets currently only for Idle + Run."
+					emptyLabel.Visible = true
+				end
+			elseif lastChosenCategory == "Roblox Anims" then
+				emptyLabel.Text = "Roblox presets coming soon. Use Custom Anims for now."
+				emptyLabel.Visible = true
+			elseif lastChosenCategory == "Unreleased" then
+				emptyLabel.Text = "Unreleased presets coming soon."
+				emptyLabel.Visible = true
+			end
+		end
+
+		for _, s in ipairs(states) do
+			local b = stateButtons[s]
+			if b then
+				b.MouseButton1Click:Connect(function()
+					task.defer(function()
+						updateCurrentLabel()
+						rebuildPresets()
+					end)
+				end)
+			end
+		end
+		for _, c in ipairs(categories) do
+			local b = catButtons[c]
+			if b then
+				b.MouseButton1Click:Connect(function()
+					task.defer(function()
+						updateCurrentLabel()
+						rebuildPresets()
+					end)
+				end)
+			end
+		end
+
+		rebuildPresets()
+
+		local savedHeader = makeText(animScroll, "Saved Overrides", 14, true)
+		savedHeader.Size = UDim2.new(1, 0, 0, 18)
+
+		local savedBox = Instance.new("TextLabel")
+		savedBox.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+		savedBox.BackgroundTransparency = 0.25
+		savedBox.BorderSizePixel = 0
+		savedBox.Size = UDim2.new(1, 0, 0, 120)
+		savedBox.Font = Enum.Font.Gotham
+		savedBox.TextSize = 13
+		savedBox.TextXAlignment = Enum.TextXAlignment.Left
+		savedBox.TextYAlignment = Enum.TextYAlignment.Top
+		savedBox.TextWrapped = true
+		savedBox.TextColor3 = Color3.fromRGB(235, 235, 235)
+		savedBox.Text = ""
+		savedBox.Parent = animScroll
+		makeCorner(savedBox, 10)
+
+		local function rebuildSavedText()
+			local lines = {}
+			for _, s in ipairs(states) do
+				local v = stateOverrides[s]
+				if v then
+					table.insert(lines, s .. ": " .. tostring(v))
+				end
+			end
+			if #lines == 0 then
+				savedBox.Text = "(none)"
+			else
+				savedBox.Text = table.concat(lines, "\n")
+			end
+		end
+
+		rebuildSavedText()
+
+		local oldScheduleSave = scheduleSave
+		scheduleSave = function()
+			oldScheduleSave()
+			rebuildSavedText()
+		end
+	end
+
+	----------------------------------------------------------------
+	-- PLAYER TAB continues in Part 3
+	----------------------------------------------------------------
+	----------------------------------------------------------------
+	-- PLAYER TAB (filled)
+	----------------------------------------------------------------
+	do
+		local header = makeText(playerScroll, "Player", 16, true)
+		header.Size = UDim2.new(1, 0, 0, 22)
+
+		local info = makeText(playerScroll,
+			"Adjust client-side movement settings.\nIf something feels off, blame lag. Or me. Preferably lag.",
+			13, false
+		)
+		info.TextColor3 = Color3.fromRGB(220, 220, 220)
+		info.Size = UDim2.new(1, 0, 0, 54)
+
+		local function makeNumberRow(labelText, getFn, setFn, resetFn, minV, maxV)
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 44)
+			row.Parent = playerScroll
+
+			local l = makeText(row, labelText, 14, true)
+			l.Size = UDim2.new(0, 120, 1, 0)
+
+			local box = makeInput(row, "number")
+			box.Size = UDim2.new(1, -240, 0, 36)
+			box.Position = UDim2.new(0, 130, 0, 4)
+			box.Text = tostring(getFn() or "")
+
+			local applyBtn = makeButton(row, "Apply")
+			applyBtn.Size = UDim2.new(0, 70, 0, 36)
+			applyBtn.AnchorPoint = Vector2.new(1, 0)
+			applyBtn.Position = UDim2.new(1, -90, 0, 4)
+
+			local resetBtn = makeButton(row, "Reset")
+			resetBtn.Size = UDim2.new(0, 70, 0, 36)
+			resetBtn.AnchorPoint = Vector2.new(1, 0)
+			resetBtn.Position = UDim2.new(1, -10, 0, 4)
+
+			local function applyFromBox()
+				local n = tonumber(box.Text)
+				if not n then
+					notify("Player", "Enter a valid number.", 2)
+					return
+				end
+				if minV then n = math.max(minV, n) end
+				if maxV then n = math.min(maxV, n) end
+				n = math.floor(n + 0.5)
+				setFn(n)
+				box.Text = tostring(getFn() or n)
+				applyPlayerSpeed()
+				scheduleSave()
+			end
+
+			applyBtn.MouseButton1Click:Connect(function()
+				applyFromBox()
+			end)
+
+			resetBtn.MouseButton1Click:Connect(function()
+				resetFn()
+				box.Text = tostring(getFn() or "")
+				applyPlayerSpeed()
+				scheduleSave()
+			end)
+		end
+
+		makeNumberRow("WalkSpeed:", function() return playerSpeed end, function(v) playerSpeed = v end, function()
+			if humanoid and DEFAULT_WALKSPEED then
+				playerSpeed = DEFAULT_WALKSPEED
+			else
+				playerSpeed = 16
+			end
+		end, 2, 500)
+
+		local row2 = Instance.new("Frame")
+		row2.BackgroundTransparency = 1
+		row2.Size = UDim2.new(1, 0, 0, 44)
+		row2.Parent = playerScroll
+
+		local lay2 = Instance.new("UIListLayout")
+		lay2.FillDirection = Enum.FillDirection.Horizontal
+		lay2.Padding = UDim.new(0, 10)
+		lay2.VerticalAlignment = Enum.VerticalAlignment.Center
+		lay2.Parent = row2
+
+		local applyNow = makeButton(row2, "Apply Now")
+		applyNow.Size = UDim2.new(0, 160, 0, 36)
+		applyNow.MouseButton1Click:Connect(function()
+			applyPlayerSpeed()
+			notify("Player", "Applied.", 2)
+		end)
+
+		local resetNow = makeButton(row2, "Reset to Default")
+		resetNow.Size = UDim2.new(0, 180, 0, 36)
+		resetNow.MouseButton1Click:Connect(function()
+			if DEFAULT_WALKSPEED then
+				playerSpeed = DEFAULT_WALKSPEED
+			else
+				playerSpeed = 16
+			end
+			applyPlayerSpeed()
+			scheduleSave()
+			notify("Player", "Reset.", 2)
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- CAMERA TAB (filled)
+	----------------------------------------------------------------
+	do
+		local header = makeText(cameraScroll, "Camera", 16, true)
+		header.Size = UDim2.new(1, 0, 0, 22)
+
+		local info = makeText(cameraScroll,
+			"These are client-side camera tweaks.\nCameraSubject stays Humanoid to preserve Shift Lock.",
+			13, false
+		)
+		info.TextColor3 = Color3.fromRGB(220, 220, 220)
+		info.Size = UDim2.new(1, 0, 0, 54)
+
+		local function makeNumberRow(scroll, labelText, getFn, setFn, resetFn, minV, maxV, round)
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 44)
+			row.Parent = scroll
+
+			local l = makeText(row, labelText, 14, true)
+			l.Size = UDim2.new(0, 120, 1, 0)
+
+			local box = makeInput(row, "number")
+			box.Size = UDim2.new(1, -240, 0, 36)
+			box.Position = UDim2.new(0, 130, 0, 4)
+			box.Text = tostring(getFn() or "")
+
+			local applyBtn = makeButton(row, "Apply")
+			applyBtn.Size = UDim2.new(0, 70, 0, 36)
+			applyBtn.AnchorPoint = Vector2.new(1, 0)
+			applyBtn.Position = UDim2.new(1, -90, 0, 4)
+
+			local resetBtn = makeButton(row, "Reset")
+			resetBtn.Size = UDim2.new(0, 70, 0, 36)
+			resetBtn.AnchorPoint = Vector2.new(1, 0)
+			resetBtn.Position = UDim2.new(1, -10, 0, 4)
+
+			local function parse()
+				local n = tonumber(box.Text)
+				if not n then
+					notify("Camera", "Enter a valid number.", 2)
+					return nil
+				end
+				if minV then n = math.max(minV, n) end
+				if maxV then n = math.min(maxV, n) end
+				if round == "int" then
+					n = math.floor(n + 0.5)
+				end
+				return n
+			end
+
+			applyBtn.MouseButton1Click:Connect(function()
+				local n = parse()
+				if not n then return end
+				setFn(n)
+				box.Text = tostring(getFn() or n)
+				applyCameraSettings()
+				scheduleSave()
+			end)
+
+			resetBtn.MouseButton1Click:Connect(function()
+				resetFn()
+				box.Text = tostring(getFn() or "")
+				applyCameraSettings()
+				scheduleSave()
+			end)
+		end
+
+		makeNumberRow(cameraScroll, "FOV:", function() return camFov end, function(v) camFov = v end, function()
+			if DEFAULT_FOV then camFov = DEFAULT_FOV else camFov = 70 end
+		end, 40, 120, "int")
+
+		makeNumberRow(cameraScroll, "Max Zoom:", function() return camMaxZoom end, function(v) camMaxZoom = v end, function()
+			camMaxZoom = INFINITE_ZOOM
+		end, 5, INFINITE_ZOOM, "int")
+
+		do
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 74)
+			row.Parent = cameraScroll
+
+			local title = makeText(row, "Camera Offset (X Y Z):", 14, true)
+			title.Size = UDim2.new(1, 0, 0, 18)
+
+			local inner = Instance.new("Frame")
+			inner.BackgroundTransparency = 1
+			inner.Position = UDim2.new(0, 0, 0, 24)
+			inner.Size = UDim2.new(1, 0, 0, 44)
+			inner.Parent = row
+
+			local lay = Instance.new("UIListLayout")
+			lay.FillDirection = Enum.FillDirection.Horizontal
+			lay.Padding = UDim.new(0, 10)
+			lay.VerticalAlignment = Enum.VerticalAlignment.Center
+			lay.Parent = inner
+
+			local function makeSmallBox()
+				local b = makeInput(inner, "0")
+				b.Size = UDim2.new(0, 90, 0, 36)
+				return b
+			end
+
+			local xBox = makeSmallBox()
+			local yBox = makeSmallBox()
+			local zBox = makeSmallBox()
+
+			xBox.Text = tostring(camOffset.X)
+			yBox.Text = tostring(camOffset.Y)
+			zBox.Text = tostring(camOffset.Z)
+
+			local applyBtn = makeButton(inner, "Apply")
+			applyBtn.Size = UDim2.new(0, 90, 0, 36)
+
+			local resetBtn = makeButton(inner, "Reset")
+			resetBtn.Size = UDim2.new(0, 90, 0, 36)
+
+			local function applyOffsetFromBoxes()
+				local x = tonumber(xBox.Text)
+				local y = tonumber(yBox.Text)
+				local z = tonumber(zBox.Text)
+				if (not x) or (not y) or (not z) then
+					notify("Camera", "Offset must be numbers.", 2)
+					return
+				end
+				camOffset = Vector3.new(x, y, z)
+				applyCameraSettings()
+				scheduleSave()
+			end
+
+			applyBtn.MouseButton1Click:Connect(function()
+				applyOffsetFromBoxes()
+			end)
+
+			resetBtn.MouseButton1Click:Connect(function()
+				camOffset = Vector3.new(0, 0, 0)
+				xBox.Text = "0"
+				yBox.Text = "0"
+				zBox.Text = "0"
+				applyCameraSettings()
+				scheduleSave()
+			end)
+		end
+
+		local row2 = Instance.new("Frame")
+		row2.BackgroundTransparency = 1
+		row2.Size = UDim2.new(1, 0, 0, 44)
+		row2.Parent = cameraScroll
+
+		local lay2 = Instance.new("UIListLayout")
+		lay2.FillDirection = Enum.FillDirection.Horizontal
+		lay2.Padding = UDim.new(0, 10)
+		lay2.VerticalAlignment = Enum.VerticalAlignment.Center
+		lay2.Parent = row2
+
+		local applyNow = makeButton(row2, "Apply Now")
+		applyNow.Size = UDim2.new(0, 160, 0, 36)
+		applyNow.MouseButton1Click:Connect(function()
+			applyCameraSettings()
+			notify("Camera", "Applied.", 2)
+		end)
+
+		local resetNow = makeButton(row2, "Reset to Default")
+		resetNow.Size = UDim2.new(0, 180, 0, 36)
+		resetNow.MouseButton1Click:Connect(function()
+			if DEFAULT_FOV then camFov = DEFAULT_FOV else camFov = 70 end
+			camOffset = Vector3.new(0, 0, 0)
+			camMaxZoom = INFINITE_ZOOM
+			applyCameraSettings()
+			scheduleSave()
+			notify("Camera", "Reset.", 2)
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- LIGHTING TAB (filled)
+	----------------------------------------------------------------
+	do
+		local header = makeText(lightingScroll, "Lighting", 16, true)
+		header.Size = UDim2.new(1, 0, 0, 22)
+
+		local info = makeText(lightingScroll,
+			"Client-side lighting tweaks.\nThese affect only your view, not the server.",
+			13, false
+		)
+		info.TextColor3 = Color3.fromRGB(220, 220, 220)
+		info.Size = UDim2.new(1, 0, 0, 54)
+
+		local function getOrInitLightingState()
+			if typeof(_G.__SOS_LightingSaveState) ~= "table" then
+				_G.__SOS_LightingSaveState = {
+					Brightness = Lighting.Brightness,
+					ClockTime = Lighting.ClockTime,
+					FogEnd = Lighting.FogEnd,
+				}
+			end
+			return _G.__SOS_LightingSaveState
+		end
+
+		local function applyLightingState()
+			local s = getOrInitLightingState()
+			if typeof(s.Brightness) == "number" then Lighting.Brightness = s.Brightness end
+			if typeof(s.ClockTime) == "number" then Lighting.ClockTime = s.ClockTime end
+			if typeof(s.FogEnd) == "number" then Lighting.FogEnd = s.FogEnd end
+		end
+
+		local function makeNumberRow(labelText, getFn, setFn, minV, maxV, roundInt)
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 44)
+			row.Parent = lightingScroll
+
+			local l = makeText(row, labelText, 14, true)
+			l.Size = UDim2.new(0, 120, 1, 0)
+
+			local box = makeInput(row, "number")
+			box.Size = UDim2.new(1, -240, 0, 36)
+			box.Position = UDim2.new(0, 130, 0, 4)
+			box.Text = tostring(getFn() or "")
+
+			local applyBtn = makeButton(row, "Apply")
+			applyBtn.Size = UDim2.new(0, 70, 0, 36)
+			applyBtn.AnchorPoint = Vector2.new(1, 0)
+			applyBtn.Position = UDim2.new(1, -90, 0, 4)
+
+			local resetBtn = makeButton(row, "Reset")
+			resetBtn.Size = UDim2.new(0, 70, 0, 36)
+			resetBtn.AnchorPoint = Vector2.new(1, 0)
+			resetBtn.Position = UDim2.new(1, -10, 0, 4)
+
+			applyBtn.MouseButton1Click:Connect(function()
+				local n = tonumber(box.Text)
+				if not n then
+					notify("Lighting", "Enter a valid number.", 2)
+					return
+				end
+				if minV then n = math.max(minV, n) end
+				if maxV then n = math.min(maxV, n) end
+				if roundInt then n = math.floor(n + 0.5) end
+				setFn(n)
+				box.Text = tostring(getFn() or n)
+				applyLightingState()
+				scheduleSave()
+			end)
+
+			resetBtn.MouseButton1Click:Connect(function()
+				_G.__SOS_LightingSaveState = {
+					Brightness = Lighting.Brightness,
+					ClockTime = Lighting.ClockTime,
+					FogEnd = Lighting.FogEnd,
+				}
+				box.Text = tostring(getFn() or "")
+				applyLightingState()
+				scheduleSave()
+			end)
+		end
+
+		getOrInitLightingState()
+
+		makeNumberRow("Brightness:", function() return (getOrInitLightingState().Brightness) end, function(v)
+			local s = getOrInitLightingState()
+			s.Brightness = v
+		end, 0, 10, false)
+
+		makeNumberRow("ClockTime:", function() return (getOrInitLightingState().ClockTime) end, function(v)
+			local s = getOrInitLightingState()
+			s.ClockTime = v
+		end, 0, 24, false)
+
+		makeNumberRow("FogEnd:", function() return (getOrInitLightingState().FogEnd) end, function(v)
+			local s = getOrInitLightingState()
+			s.FogEnd = v
+		end, 0, 1e6, true)
+
+		local row2 = Instance.new("Frame")
+		row2.BackgroundTransparency = 1
+		row2.Size = UDim2.new(1, 0, 0, 44)
+		row2.Parent = lightingScroll
+
+		local lay2 = Instance.new("UIListLayout")
+		lay2.FillDirection = Enum.FillDirection.Horizontal
+		lay2.Padding = UDim.new(0, 10)
+		lay2.VerticalAlignment = Enum.VerticalAlignment.Center
+		lay2.Parent = row2
+
+		local applyNow = makeButton(row2, "Apply Now")
+		applyNow.Size = UDim2.new(0, 160, 0, 36)
+		applyNow.MouseButton1Click:Connect(function()
+			applyLightingState()
+			notify("Lighting", "Applied.", 2)
+		end)
+
+		local resetNow = makeButton(row2, "Reset to Game")
+		resetNow.Size = UDim2.new(0, 180, 0, 36)
+		resetNow.MouseButton1Click:Connect(function()
+			_G.__SOS_LightingSaveState = {
+				Brightness = Lighting.Brightness,
+				ClockTime = Lighting.ClockTime,
+				FogEnd = Lighting.FogEnd,
+			}
+			applyLightingState()
+			scheduleSave()
+			notify("Lighting", "Reset.", 2)
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- SERVER TAB (includes Rejoin + Server Hop)
+	----------------------------------------------------------------
+	do
+		local header = makeText(serverScroll, "Server", 16, true)
+		header.Size = UDim2.new(1, 0, 0, 22)
+
+		local info = makeText(serverScroll,
+			"Read-only info plus quick travel.\nServer Hop uses a public servers lookup. If HTTP is blocked, it will say so.",
+			13, false
+		)
+		info.TextColor3 = Color3.fromRGB(220, 220, 220)
+		info.Size = UDim2.new(1, 0, 0, 60)
+
+		local function makeInfoLine(label, value)
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 28)
+			row.Parent = serverScroll
+
+			local l = makeText(row, label, 14, true)
+			l.Size = UDim2.new(0, 120, 1, 0)
+
+			local v = makeText(row, value or "", 14, false)
+			v.Size = UDim2.new(1, -130, 1, 0)
+			v.Position = UDim2.new(0, 130, 0, 0)
+			v.TextXAlignment = Enum.TextXAlignment.Left
+			v.TextColor3 = Color3.fromRGB(235, 235, 235)
+			return v
+		end
+
+		makeInfoLine("PlaceId:", tostring(game.PlaceId))
+		makeInfoLine("JobId:", tostring(game.JobId))
+		local countLine = makeInfoLine("Players:", tostring(#Players:GetPlayers()))
+		local pingLine = makeInfoLine("Ping:", "n/a")
+
+		local function tryGetPingMs()
+			local ok, res = pcall(function()
+				local Stats = game:GetService("Stats")
+				if not Stats then return nil end
+				local net = Stats:FindFirstChild("Network")
+				if not net then return nil end
+
+				local serverStats = net:FindFirstChild("ServerStatsItem")
+				if not serverStats then return nil end
+
+				local pingItem = serverStats:FindFirstChild("Data Ping") or serverStats:FindFirstChild("Ping")
+				if pingItem and pingItem.GetValueString then
+					local s = pingItem:GetValueString()
+					local ms = tonumber(s:match("(%d+)%s*ms"))
+					return ms
+				end
+				return nil
+			end)
+			if ok then return res end
+			return nil
+		end
+
+		local acc = 0
+		RunService.Heartbeat:Connect(function(dt)
+			acc = acc + dt
+			if acc < 1.0 then return end
+			acc = 0
+			countLine.Text = tostring(#Players:GetPlayers())
+			local ms = tryGetPingMs()
+			if ms then
+				pingLine.Text = tostring(ms) .. " ms"
+			else
+				pingLine.Text = "n/a"
+			end
+		end)
+
+		local btnRow = Instance.new("Frame")
+		btnRow.BackgroundTransparency = 1
+		btnRow.Size = UDim2.new(1, 0, 0, 44)
+		btnRow.Parent = serverScroll
+
+		local lay = Instance.new("UIListLayout")
+		lay.FillDirection = Enum.FillDirection.Horizontal
+		lay.Padding = UDim.new(0, 10)
+		lay.VerticalAlignment = Enum.VerticalAlignment.Center
+		lay.Parent = btnRow
+
+		local rejoinBtn = makeButton(btnRow, "Rejoin")
+		rejoinBtn.Size = UDim2.new(0, 160, 0, 36)
+
+		local hopBtn = makeButton(btnRow, "Server Hop")
+		hopBtn.Size = UDim2.new(0, 160, 0, 36)
+
+		rejoinBtn.MouseButton1Click:Connect(function()
+			notify("Server", "Rejoining...", 2)
+			pcall(function()
+				TeleportService:Teleport(game.PlaceId, LocalPlayer)
+			end)
+		end)
+
+		local hopping = false
+		local function pickDifferentServer()
+			local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
+			local data = HttpService:GetAsync(url)
+			local decoded = HttpService:JSONDecode(data)
+			if typeof(decoded) ~= "table" then return nil end
+			if typeof(decoded.data) ~= "table" then return nil end
+
+			for _, srv in ipairs(decoded.data) do
+				if typeof(srv) == "table" then
+					local id = srv.id
+					local playing = srv.playing
+					local maxPlayers = srv.maxPlayers
+					if id and id ~= game.JobId and tonumber(playing) and tonumber(maxPlayers) then
+						if playing < maxPlayers then
+							return id
+						end
+					end
+				end
+			end
+			return nil
+		end
+
+		hopBtn.MouseButton1Click:Connect(function()
+			if hopping then
+				notify("Server", "Already trying to hop.", 2)
+				return
+			end
+			hopping = true
+			notify("Server", "Searching servers...", 2)
+
+			task.spawn(function()
+				local ok, serverId = pcall(function()
+					return pickDifferentServer()
+				end)
+
+				if ok and serverId then
+					notify("Server", "Hopping...", 2)
+					pcall(function()
+						TeleportService:TeleportToPlaceInstance(game.PlaceId, serverId, LocalPlayer)
+					end)
+				else
+					notify("Server", "Server hop failed (HTTP blocked or no open servers).", 3)
+				end
+				hopping = false
+			end)
+		end)
 	end
 
 	----------------------------------------------------------------
@@ -2060,7 +3108,8 @@ local function createUI()
 		setMenu(not menuOpen, false)
 	end)
 
-	setMenu(false, true)
+	uiSetMenu = setMenu
+	setMenu(true, true)
 
 	----------------------------------------------------------------
 	-- Mobile Fly button
@@ -2084,209 +3133,41 @@ local function createUI()
 end
 
 --------------------------------------------------------------------
--- INPUT
+-- BOOTSTRAP
 --------------------------------------------------------------------
-UserInputService.InputBegan:Connect(function(input, gp)
-	if gp then return end
+local function fullInit()
+	loadSettings()
+	getCharacter()
+	applyPlayerSpeed()
+	applyCameraSettings()
 
-	if input.KeyCode == flightToggleKey then
-		if flying then stopFlying() else startFlying() end
-	elseif input.KeyCode == menuToggleKey then
-		if arrowButton then
-			pcall(function()
-				arrowButton:Activate()
-			end)
-		end
-	elseif input.KeyCode == Enum.KeyCode.Escape then
-		if statsPopup then
-			statsPopup.Visible = false
-		end
-	end
-end)
+	createUI()
 
---------------------------------------------------------------------
--- RENDER LOOP (Flight + FPS)
---------------------------------------------------------------------
-RunService.RenderStepped:Connect(function(dt)
-	fpsAcc = fpsAcc + dt
-	fpsFrames = fpsFrames + 1
-	if fpsAcc >= 0.25 then
-		fpsValue = math.floor((fpsFrames / fpsAcc) + 0.5)
-		fpsAcc = 0
-		fpsFrames = 0
-	end
+	hookChatListeners()
 
-	if fpsLabel then
-		fpsLabel.Text = tostring(fpsValue) .. " fps"
-		if fpsValue < 40 then
-			fpsLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-		elseif fpsValue < 60 then
-			fpsLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
-		elseif fpsValue < 76 then
-			fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-		elseif fpsValue < 121 then
-			fpsLabel.TextColor3 = Color3.fromRGB(80, 255, 220)
-		elseif fpsValue < 241 then
-			fpsLabel.TextColor3 = Color3.fromRGB(80, 140, 255)
-		else
-			rainbowHue = (rainbowHue + dt * 0.6) % 1
-			fpsLabel.TextColor3 = Color3.fromHSV(rainbowHue, 1, 1)
-		end
-	end
-
-	if not flying or not rootPart or not camera or not bodyGyro or not bodyVel then return end
-
-	updateMovementInput()
-
-	local camCF = camera.CFrame
-	local camLook = camCF.LookVector
-	local camRight = camCF.RightVector
-
-	local moveDir = Vector3.new(0, 0, 0)
-	moveDir = moveDir + camLook * (-moveInput.Z)
-	moveDir = moveDir + camRight * (moveInput.X)
-	moveDir = moveDir + Vector3.new(0, verticalInput, 0)
-
-	local moveMagnitude = moveDir.Magnitude
-	local hasHorizontal = Vector3.new(moveInput.X, 0, moveInput.Z).Magnitude > 0.01
-
-	if moveMagnitude > 0 then
-		local unit = moveDir.Unit
-		local targetVel = unit * flySpeed
-		local alphaVel = clamp01(dt * velocityLerpRate)
-		currentVelocity = currentVelocity:Lerp(targetVel, alphaVel)
-	else
-		local alphaIdle = clamp01(dt * idleSlowdownRate)
-		currentVelocity = currentVelocity:Lerp(Vector3.new(), alphaIdle)
-	end
-	bodyVel.Velocity = currentVelocity
-
-	local lookDir
-	if moveMagnitude > 0.05 then
-		lookDir = moveDir.Unit
-	else
-		lookDir = camLook.Unit
-	end
-
-	if lookDir.Magnitude < 0.01 then
-		lookDir = Vector3.new(0, 0, -1)
-	end
-
-	local baseCF = CFrame.lookAt(rootPart.Position, rootPart.Position + lookDir)
-
-	local tiltDeg
-	if moveMagnitude > 0.1 then
-		tiltDeg = MOVING_TILT_DEG
-	else
-		tiltDeg = IDLE_TILT_DEG
-	end
-
-	if not hasHorizontal and verticalInput < 0 then
-		tiltDeg = 90
-	elseif not hasHorizontal and verticalInput > 0 then
-		tiltDeg = 0
-	end
-
-	local targetCF = baseCF * CFrame.Angles(-math.rad(tiltDeg), 0, 0)
-
-	if not currentGyroCFrame then
-		currentGyroCFrame = targetCF
-	end
-	currentGyroCFrame = currentGyroCFrame:Lerp(targetCF, clamp01(dt * rotationLerpRate))
-	bodyGyro.CFrame = currentGyroCFrame
-
-	if humanoid and humanoid.RigType ~= Enum.HumanoidRigType.R6 then
-		local now = os.clock()
-		local shouldFlyAnim = (moveMagnitude > ANIM_TO_FLY_THRESHOLD)
-		local shouldFloatAnim = (moveMagnitude < ANIM_TO_FLOAT_THRESHOLD)
-
-		if shouldFlyAnim and animMode ~= "Fly" and (now - lastAnimSwitch) >= ANIM_SWITCH_COOLDOWN then
-			animMode = "Fly"
-			lastAnimSwitch = now
-			playFly()
-		elseif shouldFloatAnim and animMode ~= "Float" and (now - lastAnimSwitch) >= ANIM_SWITCH_COOLDOWN then
-			animMode = "Float"
-			lastAnimSwitch = now
-			playFloat()
-		end
-	end
-
-	if rightShoulder and defaultShoulderC0 and character then
-		local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
-		if torso then
-			local relDir = torso.CFrame:VectorToObjectSpace(camLook)
-			local yaw = math.atan2(-relDir.Z, relDir.X)
-			local pitch = math.asin(relDir.Y)
-
-			local armCF =
-				CFrame.new() *
-				CFrame.Angles(0, -math.pi/2, 0) *
-				CFrame.Angles(-pitch * 0.9, 0, -yaw * 0.25)
-
-			rightShoulder.C0 = defaultShoulderC0 * armCF
-		end
-	end
-end)
-
---------------------------------------------------------------------
--- MAIN
---------------------------------------------------------------------
-loadSettings()
-getCharacter()
-
-for _, plr in ipairs(Players:GetPlayers()) do
-	hookPlayerForTags(plr)
-end
-Players.PlayerAdded:Connect(function(plr)
-	hookPlayerForTags(plr)
-end)
-Players.PlayerRemoving:Connect(function(plr)
-	if plr and plr.Character then
-		destroyTagGui(plr.Character, "SOS_RoleTag")
-		destroyTagGui(plr.Character, "SOS_AKTag")
-		destroyTagGui(plr.Character, "SOS_KSKTag")
-	end
-end)
-
-hookChatListeners()
-
--- fast initial tags
-task.defer(function()
-	-- Owners get their role tag instantly
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if isOwner(plr) then
-			refreshAllTagsForPlayer(plr)
-		end
+		hookPlayerForTags(plr)
 	end
+	Players.PlayerAdded:Connect(function(plr)
+		hookPlayerForTags(plr)
+	end)
 
-	-- Broadcast all three markers on startup for you
-	-- SOS marker means you are SOS
-	-- AK and KSK are independent markers
+	-- Broadcast on startup (requested)
 	broadcastSosMarker()
 	broadcastAkMarker()
-	broadcastKskMarker()
-end)
 
-createUI()
-applyPlayerSpeed()
-applyCameraSettings()
-reapplyAllOverridesAfterRespawn()
+	-- Owner rule applied to self too
+	enforceOwnerNoAk(LocalPlayer)
+
+	notify("SOS HUD", "Loaded.", 2)
+end
 
 LocalPlayer.CharacterAdded:Connect(function()
-	task.wait(0.12)
+	task.wait(0.2)
 	getCharacter()
-
 	applyPlayerSpeed()
 	applyCameraSettings()
 	reapplyAllOverridesAfterRespawn()
-
-	for _, plr in ipairs(Players:GetPlayers()) do
-		refreshAllTagsForPlayer(plr)
-	end
-
-	if flying then
-		stopFlying()
-	end
 end)
 
-notify("SOS HUD", "Loaded.", 2)
+task.defer(fullInit)
