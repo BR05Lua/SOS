@@ -1320,4 +1320,33 @@ end
 
 task.delay(INIT_DELAY, init)
 
-safeLoad("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source")
+local function safeLoad(url)
+    local okHttp, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if not okHttp or type(body) ~= "string" then
+        warn("HttpGet failed:", body)
+        return
+    end
+
+    if body:find("<!DOCTYPE html>") or body:find("Not Found") then
+        warn("Wrong raw URL / 404. First 200 chars:\n" .. body:sub(1, 200))
+        return
+    end
+
+    local fn, compileErr = loadstring(body)
+    if not fn then
+        warn("Compile error:", compileErr)
+        return
+    end
+
+    local okRun, runErr = pcall(fn)
+    if not okRun then
+        warn("Runtime error:", runErr)
+        return
+    end
+
+    print("Loaded addon:", url)
+end
+
+safeLoad("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source") 
