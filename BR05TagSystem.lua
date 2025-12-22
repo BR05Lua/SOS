@@ -44,17 +44,17 @@ local TesterUserIds = {
 }
 
 local SinProfiles = {
-	[2630250935] = { SinName = "Cinna" },
+	[2630250935] = { SinName = "Cinna (Co-Owner)", Color = Color3.fromRGB(215, 214, 254) },
 	[105995794]  = { SinName = "Lettuce" },
 	[138975737]  = { SinName = "Music" },
 	[9159968275] = { SinName = "Music" },
 	[4659279349] = { SinName = "Trial" },
-	[4495710706] = { SinName = "Games Design" },
+	[4495710706] = { SinName = "Code (Owned By Fed)" },
 	[1575141882] = { SinName = "Heart", Color = Color3.fromRGB(255, 120, 210) },
 	[118170824]  = { SinName = "Security" },
 	[7870252435] = { SinName = "Security" },
-	[3600244479] = { SinName = "PAWS", Color = Color3.fromRGB(180, 1, 64) },
-	[8956134409] = { SinName = "Cars", Color = Color3.fromRGB(0, 255, 0) },
+	[3600244479] = { SinName = "PAWS (Tester)", Color = Color3.fromRGB(180, 1, 64) },
+	[8956134409] = { SinName = "Cars (Tester)", Color = Color3.fromRGB(0, 255, 0) },
 }
 
 -- OG section (empty for now, add users like SinProfiles)
