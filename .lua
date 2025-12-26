@@ -2479,8 +2479,8 @@ local function createUI()
 		setState(lastChosenState)
 	end
 
-		----------------------------------------------------------------
-	-- PLAYER TAB (updated: added Look Mum im a Car panel under speed)
+	----------------------------------------------------------------
+	-- PLAYER TAB (WalkSpeed + Look Mum im a Car pop out)
 	----------------------------------------------------------------
 	do
 		local header = makeText(playerScroll, "Player", 16, true)
@@ -2490,6 +2490,9 @@ local function createUI()
 		info.Size = UDim2.new(1, 0, 0, 34)
 		info.TextColor3 = Color3.fromRGB(210, 210, 210)
 
+		------------------------------------------------------------
+		-- WalkSpeed UI (original behaviour)
+		------------------------------------------------------------
 		local row = Instance.new("Frame")
 		row.BackgroundTransparency = 1
 		row.Size = UDim2.new(1, 0, 0, 76)
@@ -2568,9 +2571,21 @@ local function createUI()
 			notify("Player", "Speed reset.", 2)
 		end)
 
-		----------------------------------------------------------------
-		-- Look Mum im a Car (embedded car anim UI)
-		----------------------------------------------------------------
+		------------------------------------------------------------
+		-- Car pop out UI (not saved, not attached to SOS HUD)
+		------------------------------------------------------------
+		local carButton = makeButton(playerScroll, "Look Mum im a Car")
+		carButton.Size = UDim2.new(0, 240, 0, 40)
+
+		local carGui = nil
+		local carWindow = nil
+		local carState = {
+			currentIndex = 1,
+			activeTrack = nil,
+			activeConn = nil,
+			stopped = false
+		}
+
 		local CAR_ANIMS = {
 			{ id = "76503595759461", mult = 1 },
 			{ id = "115245341767944", mult = 2 },
@@ -2586,271 +2601,86 @@ local function createUI()
 			{ id = "72382226286301", mult = 1 },
 		}
 
-		local carRoot = Instance.new("Frame")
-		carRoot.Name = "CarPanelRoot"
-		carRoot.BackgroundTransparency = 1
-		carRoot.Size = UDim2.new(1, 0, 0, 420)
-		carRoot.Parent = playerScroll
-
-		local carLaunchBtn = makeButton(carRoot, "Look Mum im a Car")
-		carLaunchBtn.Size = UDim2.new(0, 260, 0, 40)
-
-		local carPanel = Instance.new("Frame")
-		carPanel.Name = "CarPanel"
-		carPanel.Visible = false
-		carPanel.BorderSizePixel = 0
-		carPanel.Size = UDim2.new(1, 0, 0, 360)
-		carPanel.Parent = carRoot
-		makeCorner(carPanel, 16)
-		makeGlass(carPanel)
-		makeStroke(carPanel, 2)
-
-		local carHeader = Instance.new("Frame")
-		carHeader.Name = "Header"
-		carHeader.BorderSizePixel = 0
-		carHeader.Size = UDim2.new(1, 0, 0, 44)
-		carHeader.Parent = carPanel
-		makeCorner(carHeader, 16)
-		makeGlass(carHeader)
-
-		local carTitle = Instance.new("TextLabel")
-		carTitle.BackgroundTransparency = 1
-		carTitle.Size = UDim2.new(1, -64, 1, 0)
-		carTitle.Position = UDim2.new(0, 12, 0, 0)
-		carTitle.Font = Enum.Font.GothamBold
-		carTitle.TextSize = 16
-		carTitle.TextXAlignment = Enum.TextXAlignment.Left
-		carTitle.Text = "Look Mum im a Car"
-		carTitle.TextColor3 = Color3.fromRGB(245, 245, 245)
-		carTitle.Parent = carHeader
-
-		-- Remove X completely. Only a minimize button, placed where X used to be (top right).
-		local carMinBtn = makeButton(carHeader, "-")
-		carMinBtn.Name = "Minimize"
-		carMinBtn.Size = UDim2.new(0, 36, 0, 30)
-		carMinBtn.AnchorPoint = Vector2.new(1, 0.5)
-		carMinBtn.Position = UDim2.new(1, -10, 0.5, 0)
-		carMinBtn.TextSize = 16
-
-		local carBody = Instance.new("Frame")
-		carBody.BackgroundTransparency = 1
-		carBody.Size = UDim2.new(1, -16, 1, -54)
-		carBody.Position = UDim2.new(0, 8, 0, 48)
-		carBody.Parent = carPanel
-
-		local animName = makeText(carBody, "Animation 1/" .. tostring(#CAR_ANIMS), 14, true)
-		animName.Size = UDim2.new(1, 0, 0, 22)
-
-		local vpOuter = Instance.new("Frame")
-		vpOuter.BorderSizePixel = 0
-		vpOuter.Position = UDim2.new(0, 0, 0, 28)
-		vpOuter.Size = UDim2.new(1, 0, 0, 200)
-		vpOuter.Parent = carBody
-		makeCorner(vpOuter, 12)
-		makeGlass(vpOuter)
-
-		local viewport = Instance.new("ViewportFrame")
-		viewport.BackgroundTransparency = 1
-		viewport.BorderSizePixel = 0
-		viewport.Size = UDim2.new(1, -8, 1, -8)
-		viewport.Position = UDim2.new(0, 4, 0, 4)
-		viewport.Parent = vpOuter
-		makeCorner(viewport, 12)
-
-		local cam = Instance.new("Camera")
-		cam.CameraType = Enum.CameraType.Scriptable
-		viewport.CurrentCamera = cam
-
-		local navRow = Instance.new("Frame")
-		navRow.BackgroundTransparency = 1
-		navRow.Position = UDim2.new(0, 0, 0, 236)
-		navRow.Size = UDim2.new(1, 0, 0, 40)
-		navRow.Parent = carBody
-
-		local prevBtn = makeButton(navRow, "Previous")
-		prevBtn.Size = UDim2.new(0.49, -5, 1, 0)
-
-		local nextBtn = makeButton(navRow, "Next")
-		nextBtn.Size = UDim2.new(0.51, -5, 1, 0)
-		nextBtn.Position = UDim2.new(0.49, 10, 0, 0)
-
-		local ctrlRow = Instance.new("Frame")
-		ctrlRow.BackgroundTransparency = 1
-		ctrlRow.Position = UDim2.new(0, 0, 0, 282)
-		ctrlRow.Size = UDim2.new(1, 0, 0, 44)
-		ctrlRow.Parent = carBody
-
-		local playBtn = makeButton(ctrlRow, "Play Car")
-		playBtn.Size = UDim2.new(0.49, -5, 1, 0)
-
-		local stopBtn = makeButton(ctrlRow, "Stop Car")
-		stopBtn.Size = UDim2.new(0.51, -5, 1, 0)
-		stopBtn.Position = UDim2.new(0.49, 10, 0, 0)
-
-		-- Car state
-		local carIndex = 1
-		local vpDummy = nil
-		local vpHumanoid = nil
-		local vpAnimator = nil
-		local vpTrack = nil
-
-		local activeTrack = nil
-		local activeConn = nil
-		local lastPlayerCamSubject = nil
-
 		local function carStopActive()
-			if activeConn then
-				pcall(function() activeConn:Disconnect() end)
-				activeConn = nil
+			if carState.activeTrack then
+				pcall(function()
+					carState.activeTrack:Stop()
+					carState.activeTrack:Destroy()
+				end)
+				carState.activeTrack = nil
+			end
+			if carState.activeConn then
+				pcall(function()
+					carState.activeConn:Disconnect()
+				end)
+				carState.activeConn = nil
 			end
 
-			if activeTrack then
-				pcall(function() activeTrack:Stop(0.1) end)
-				pcall(function() activeTrack:Destroy() end)
-				activeTrack = nil
-			end
-
-			-- Restore camera to Humanoid
-			if workspace.CurrentCamera and humanoid then
-				workspace.CurrentCamera.CameraSubject = humanoid
-			end
-
-			lastPlayerCamSubject = nil
-		end
-
-		local function vpStop()
-			if vpTrack then
-				pcall(function() vpTrack:Stop(0.1) end)
-				pcall(function() vpTrack:Destroy() end)
-				vpTrack = nil
+			if humanoid and camera then
+				pcall(function()
+					camera.CameraSubject = humanoid
+				end)
 			end
 		end
 
-		local function ensureVpDummy()
-			if vpDummy and vpDummy.Parent == viewport then
-				return true
-			end
+		local function carPlayOnCharacter()
+			if not character or not humanoid then return end
+			local hrp = character:FindFirstChild("HumanoidRootPart")
+			if not hrp then return end
 
-			if vpDummy then
-				pcall(function() vpDummy:Destroy() end)
-				vpDummy = nil
-			end
-
-			local ok, model = pcall(function()
-				return Players:CreateHumanoidModelFromUserId(1)
-			end)
-			if not ok or not model then
-				return false
-			end
-
-			vpDummy = model
-			vpDummy.Parent = viewport
-
-			local hrp = vpDummy:FindFirstChild("HumanoidRootPart") or vpDummy:FindFirstChildWhichIsA("BasePart")
-			if hrp and vpDummy.PrimaryPart == nil then
-				vpDummy.PrimaryPart = hrp
-			end
-
-			vpHumanoid = vpDummy:FindFirstChildWhichIsA("Humanoid")
-			if not vpHumanoid then
-				return false
-			end
-
-			vpAnimator = vpHumanoid:FindFirstChildOfClass("Animator")
-			if not vpAnimator then
-				vpAnimator = Instance.new("Animator")
-				vpAnimator.Parent = vpHumanoid
-			end
-
-			if vpDummy.PrimaryPart then
-				vpDummy:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
-				local focusPos = vpDummy.PrimaryPart.Position
-				cam.CFrame = CFrame.new(focusPos + Vector3.new(0, 2.7, 6), focusPos)
-			end
-
-			return true
-		end
-
-		local function vpPreview(index)
-			if not ensureVpDummy() then return end
-			vpStop()
-
-			local animId = CAR_ANIMS[index] and CAR_ANIMS[index].id
-			if not animId then return end
-
-			local a = Instance.new("Animation")
-			a.AnimationId = "rbxassetid://" .. tostring(animId)
-
-			local ok, tr = pcall(function()
-				return vpAnimator:LoadAnimation(a)
-			end)
-			if ok and tr then
-				vpTrack = tr
-				vpTrack.Priority = Enum.AnimationPriority.Action
-				vpTrack.Looped = true
-				pcall(function() vpTrack:Play(0.1) end)
-			end
-
-			animName.Text = "Animation " .. tostring(index) .. "/" .. tostring(#CAR_ANIMS)
-		end
-
-		local function playOnCharacter()
-			if not character or not humanoid or not rootPart then return end
 			carStopActive()
 
-			local animId = CAR_ANIMS[carIndex] and CAR_ANIMS[carIndex].id
-			if not animId then return end
+			local anim = Instance.new("Animation")
+			anim.AnimationId = "rbxassetid://" .. tostring(CAR_ANIMS[carState.currentIndex].id)
 
-			local a = Instance.new("Animation")
-			a.AnimationId = "rbxassetid://" .. tostring(animId)
-
-			local ok, tr = pcall(function()
-				return humanoid:LoadAnimation(a)
+			local ok, track = pcall(function()
+				return humanoid:LoadAnimation(anim)
 			end)
-			if not ok or not tr then
+			if not ok or not track then
+				notify("Car", "Failed to load animation.", 2)
 				return
 			end
 
-			activeTrack = tr
-			activeTrack.Priority = Enum.AnimationPriority.Action
-			activeTrack.Looped = true
-			pcall(function() activeTrack:Play(0.1) end)
+			track.Priority = Enum.AnimationPriority.Action
+			track.Looped = true
+			pcall(function()
+				track:Play()
+				track:AdjustWeight(1)
+			end)
+			carState.activeTrack = track
 
-			-- Put camera on Head while playing (same as your old car script)
-			lastPlayerCamSubject = workspace.CurrentCamera and workspace.CurrentCamera.CameraSubject or nil
-			if workspace.CurrentCamera then
-				workspace.CurrentCamera.CameraSubject = character:FindFirstChild("Head") or humanoid
-			end
+			pcall(function()
+				camera.CameraSubject = humanoid
+			end)
 
-			local lastPos = rootPart.Position
+			local lastPos = hrp.Position
 			local lastT = os.clock()
 
-			activeConn = RunService.Heartbeat:Connect(function()
-				if not activeTrack or not activeTrack.IsPlaying or not rootPart or not rootPart.Parent then
-					return
-				end
+			carState.activeConn = RunService.Heartbeat:Connect(function()
+				if not hrp.Parent or not carState.activeTrack or not carState.activeTrack.IsPlaying then return end
 
 				local now = os.clock()
 				local dt = now - lastT
 				if dt <= 0 then return end
 
-				local pos = rootPart.Position
+				local pos = hrp.Position
 				local vel = (pos - lastPos) / dt
-				local mag = vel.Magnitude
+				local speed = vel.Magnitude
 
-				if mag > 0.1 then
+				if speed > 0.1 then
 					local forwardDot = 0
-					if vel.Magnitude > 0.01 then
-						forwardDot = rootPart.CFrame.LookVector:Dot(vel.Unit)
-					end
-					local mult = CAR_ANIMS[carIndex].mult or 1
-					local spd = (mag / 16) * mult * (forwardDot >= 0 and 1 or -1)
 					pcall(function()
-						activeTrack:AdjustSpeed(spd)
+						forwardDot = hrp.CFrame.LookVector:Dot(vel.Unit)
+					end)
+					local sign = (forwardDot >= 0) and 1 or -1
+					local mult = CAR_ANIMS[carState.currentIndex].mult or 1
+					local calc = (speed / 16) * mult * sign
+					pcall(function()
+						carState.activeTrack:AdjustSpeed(calc)
 					end)
 				else
 					pcall(function()
-						activeTrack:AdjustSpeed(0)
+						carState.activeTrack:AdjustSpeed(0)
 					end)
 				end
 
@@ -2859,75 +2689,138 @@ local function createUI()
 			end)
 		end
 
-		local carOpen = false
-		local carMinimized = false
-
-		local function carSetOpen(open)
-			-- No untoggle. If already open and someone tries to close, we force-stop instead.
-			if carOpen and not open then
-				carStopActive()
+		local function ensureCarPopout()
+			if carGui and carGui.Parent then
 				return
 			end
 
-			carOpen = open
-			carPanel.Visible = open
-			if open then
-				carMinimized = false
-				carMinBtn.Text = "-"
-				vpPreview(carIndex)
+			carGui = Instance.new("ScreenGui")
+			carGui.Name = "SOS_CarUI"
+			carGui.ResetOnSpawn = false
+			carGui.IgnoreGuiInset = true
+			carGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+			carGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+			carGui.Enabled = true
+
+			carGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+				if not carGui.Enabled then
+					carStopActive()
+					carGui.Enabled = true
+				end
+			end)
+
+			carWindow = Instance.new("Frame")
+			carWindow.Name = "CarWindow"
+			carWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+			carWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+			carWindow.Size = UDim2.new(0, 420, 0, 360)
+			carWindow.BorderSizePixel = 0
+			carWindow.Parent = carGui
+			makeCorner(carWindow, 16)
+			makeGlass(carWindow)
+			makeStroke(carWindow, 2)
+			carWindow.Active = true
+			pcall(function()
+				carWindow.Draggable = true
+			end)
+
+			local titleBar = Instance.new("Frame")
+			titleBar.BackgroundTransparency = 1
+			titleBar.Size = UDim2.new(1, 0, 0, 46)
+			titleBar.Parent = carWindow
+
+			local title = makeText(titleBar, "Look Mum im a Car", 18, true)
+			title.Size = UDim2.new(1, -80, 1, 0)
+			title.Position = UDim2.new(0, 14, 0, 0)
+			title.TextXAlignment = Enum.TextXAlignment.Left
+
+			local minBtn = makeButton(titleBar, "-")
+			minBtn.Size = UDim2.new(0, 44, 0, 34)
+			minBtn.Position = UDim2.new(1, -56, 0, 6)
+
+			local content = Instance.new("Frame")
+			content.BackgroundTransparency = 1
+			content.Position = UDim2.new(0, 14, 0, 54)
+			content.Size = UDim2.new(1, -28, 1, -68)
+			content.Parent = carWindow
+
+			local infoLine = makeText(content, "Pick an animation, then Play. Stop returns your camera properly. Not bad for a car, honestly.", 13, false)
+			infoLine.Size = UDim2.new(1, 0, 0, 34)
+			infoLine.TextColor3 = Color3.fromRGB(210, 210, 210)
+
+			local navRow = Instance.new("Frame")
+			navRow.BackgroundTransparency = 1
+			navRow.Position = UDim2.new(0, 0, 0, 44)
+			navRow.Size = UDim2.new(1, 0, 0, 40)
+			navRow.Parent = content
+
+			local prevBtn = makeButton(navRow, "< Prev")
+			prevBtn.Size = UDim2.new(0.48, 0, 1, 0)
+
+			local nextBtn = makeButton(navRow, "Next >")
+			nextBtn.Size = UDim2.new(0.48, 0, 1, 0)
+			nextBtn.Position = UDim2.new(0.52, 0, 0, 0)
+
+			local nameLabel = makeText(content, "", 14, true)
+			nameLabel.Position = UDim2.new(0, 0, 0, 92)
+			nameLabel.Size = UDim2.new(1, 0, 0, 22)
+			nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+			local function refreshName()
+				nameLabel.Text = "Animation " .. tostring(carState.currentIndex) .. " / " .. tostring(#CAR_ANIMS)
 			end
-		end
+			refreshName()
 
-		local function carSetMinimized(mini)
-			if not carOpen then return end
-			if carMinimized == mini then return end
-			carMinimized = mini
+			local controlsRow = Instance.new("Frame")
+			controlsRow.BackgroundTransparency = 1
+			controlsRow.Position = UDim2.new(0, 0, 1, -44)
+			controlsRow.Size = UDim2.new(1, 0, 0, 40)
+			controlsRow.Parent = content
 
-			-- Any attempt to minimize counts as "untoggle" behavior, so we force Stop Car.
-			carStopActive()
+			local playBtn = makeButton(controlsRow, "Play Car")
+			playBtn.Size = UDim2.new(0.48, 0, 1, 0)
 
-			if carMinimized then
-				carMinBtn.Text = "+"
-				carBody.Visible = false
-				carPanel.Size = UDim2.new(1, 0, 0, 60)
-			else
-				carMinBtn.Text = "-"
-				carBody.Visible = true
-				carPanel.Size = UDim2.new(1, 0, 0, 360)
-				vpPreview(carIndex)
-			end
-		end
+			local stopBtn = makeButton(controlsRow, "Stop Car")
+			stopBtn.Size = UDim2.new(0.48, 0, 1, 0)
+			stopBtn.Position = UDim2.new(0.52, 0, 0, 0)
 
-		carLaunchBtn.MouseButton1Click:Connect(function()
-			if not carOpen then
-				carSetOpen(true)
-			else
-				-- Cannot untoggle. Pressing again just stops the car animation without closing the UI.
+			prevBtn.MouseButton1Click:Connect(function()
+				carState.currentIndex = (carState.currentIndex - 2) % #CAR_ANIMS + 1
+				refreshName()
+			end)
+
+			nextBtn.MouseButton1Click:Connect(function()
+				carState.currentIndex = carState.currentIndex % #CAR_ANIMS + 1
+				refreshName()
+			end)
+
+			playBtn.MouseButton1Click:Connect(function()
+				carPlayOnCharacter()
+			end)
+
+			stopBtn.MouseButton1Click:Connect(function()
 				carStopActive()
+			end)
+
+			minBtn.MouseButton1Click:Connect(function()
+				if not content.Visible then
+					content.Visible = true
+					carWindow.Size = UDim2.new(0, 420, 0, 360)
+				else
+					content.Visible = false
+					carWindow.Size = UDim2.new(0, 420, 0, 52)
+				end
+			end)
+		end
+
+		carButton.MouseButton1Click:Connect(function()
+			ensureCarPopout()
+			if carGui then
+				carGui.Enabled = true
 			end
-		end)
-
-		carMinBtn.MouseButton1Click:Connect(function()
-			carSetMinimized(not carMinimized)
-		end)
-
-		prevBtn.MouseButton1Click:Connect(function()
-			carIndex = (carIndex - 2) % #CAR_ANIMS + 1
-			vpPreview(carIndex)
-		end)
-
-		nextBtn.MouseButton1Click:Connect(function()
-			carIndex = (carIndex % #CAR_ANIMS) + 1
-			vpPreview(carIndex)
-		end)
-
-		playBtn.MouseButton1Click:Connect(function()
-			playOnCharacter()
-		end)
-
-		stopBtn.MouseButton1Click:Connect(function()
-			-- Stop Car must restore humanoid camera
-			carStopActive()
+			if carWindow then
+				carWindow.Visible = true
+			end
 		end)
 	end
 
