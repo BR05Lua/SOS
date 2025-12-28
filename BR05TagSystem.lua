@@ -32,17 +32,6 @@
 --   Sound: rbxassetid://136954512002069
 -- Rainbow sky effect REMOVED completely.
 
--- Addons requested:
--- - Co-Owner has a separate intro like Owner:
---     Text: "Hes Behind You"
---     Sound: rbxassetid://119023903778140
---     Flash white
--- - Owner tag text shows "Owner"
--- - Owner and Co-Owner can broadcast toggle commands via buttons above Broadcast buttons:
---     Owner_on / Owner_off (only Owners see these buttons)
---     CoOwner_on / CoOwner_off (only Co-Owner sees these buttons)
---   Only valid senders can trigger these commands on clients.
-
 --------------------------------------------------------------------
 -- SERVICES
 --------------------------------------------------------------------
@@ -78,20 +67,6 @@ local ORB_OFFSET_Y = 3.35
 --------------------------------------------------------------------
 local OWNER_ARRIVAL_TEXT = "He has Arrived"
 local OWNER_ARRIVAL_SOUND_ID = "rbxassetid://136954512002069"
-
---------------------------------------------------------------------
--- CO-OWNER ARRIVAL
---------------------------------------------------------------------
-local COOWNER_ARRIVAL_TEXT = "Hes Behind You"
-local COOWNER_ARRIVAL_SOUND_ID = "rbxassetid://119023903778140"
-
---------------------------------------------------------------------
--- COMMANDS
---------------------------------------------------------------------
-local CMD_OWNER_ON = "Owner_on"
-local CMD_OWNER_OFF = "Owner_off"
-local CMD_COOWNER_ON = "CoOwner_on"
-local CMD_COOWNER_OFF = "CoOwner_off"
 
 --------------------------------------------------------------------
 -- ROLES DATA
@@ -135,7 +110,7 @@ local SinProfiles = {
 
 -- OG profiles (empty by default)
 local OgProfiles = {
-	[8956134409] = { OGName = "BR05", Color = Color3.fromRGB(255, 0, 0) }
+		[8956134409] = { OGName = "BR05", Color = Color3.fromRGB(255, 0, 0) }
 	-- [123456789] = { OgName = "OG", Color = Color3.fromRGB(160,220,255) },
 }
 
@@ -144,8 +119,6 @@ local CustomTags = {
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(255,255,255) }
 	-- [123456789] = { TagText = "Custom Title", Color = Color3.fromRGB(255,255,255) },
 }
-
-local COOWNER_USERID = 2630250935
 
 --------------------------------------------------------------------
 -- SPEED TRAILS (Owner + Cinna)
@@ -175,18 +148,8 @@ local broadcastPanel
 local broadcastSOS
 local broadcastAK
 
--- Role FX toggle panel
-local roleFxPanel
-local roleFxOnBtn
-local roleFxOffBtn
-
--- Owner presence states
+-- Owner arrival state
 local ownerPresenceAnnounced = false
-local coOwnerPresenceAnnounced = false
-
--- FX toggles (controlled by commands)
-local OwnerFxEnabled = true
-local CoOwnerFxEnabled = true
 
 -- Trail connections
 local TrailsConnByUserId = {}
@@ -315,15 +278,11 @@ local function isOwner(plr)
 	return (OwnerNames[plr.Name] == true) or (OwnerUserIds[plr.UserId] == true)
 end
 
-local function isCoOwner(plr)
-	return plr and (plr.UserId == COOWNER_USERID)
-end
-
 local function canSeeBroadcastButtons()
 	if isOwner(LocalPlayer) then
 		return true
 	end
-	return LocalPlayer.UserId == COOWNER_USERID
+	return LocalPlayer.UserId == 2630250935
 end
 
 local function ensureBroadcastPanel()
@@ -369,68 +328,6 @@ local function ensureBroadcastPanel()
 
 	broadcastAK = makeButton(broadcastPanel, "Broadcast AK")
 	broadcastAK.Size = UDim2.new(0, 100, 0, 32)
-end
-
-local function ensureRoleFxPanel()
-	ensureGui()
-
-	local showOwnerBtns = isOwner(LocalPlayer)
-	local showCoOwnerBtns = isCoOwner(LocalPlayer)
-	local shouldShow = showOwnerBtns or showCoOwnerBtns
-
-	if not shouldShow then
-		if roleFxPanel and roleFxPanel.Parent then
-			roleFxPanel:Destroy()
-		end
-		roleFxPanel = nil
-		roleFxOnBtn = nil
-		roleFxOffBtn = nil
-		return
-	end
-
-	if roleFxPanel and roleFxPanel.Parent then
-		-- Update labels if needed
-		if showOwnerBtns then
-			if roleFxOnBtn then roleFxOnBtn.Text = CMD_OWNER_ON end
-			if roleFxOffBtn then roleFxOffBtn.Text = CMD_OWNER_OFF end
-		else
-			if roleFxOnBtn then roleFxOnBtn.Text = CMD_COOWNER_ON end
-			if roleFxOffBtn then roleFxOffBtn.Text = CMD_COOWNER_OFF end
-		end
-		return
-	end
-
-	roleFxPanel = Instance.new("Frame")
-	roleFxPanel.Name = "RoleFxPanel"
-	roleFxPanel.AnchorPoint = Vector2.new(0, 1)
-	roleFxPanel.Position = UDim2.new(0, 10, 1, -64)
-	roleFxPanel.Size = UDim2.new(0, 220, 0, 44)
-	roleFxPanel.BorderSizePixel = 0
-	roleFxPanel.Parent = gui
-	makeCorner(roleFxPanel, 14)
-	makeGlass(roleFxPanel)
-	makeStroke(roleFxPanel, 2, Color3.fromRGB(200, 40, 40), 0.1)
-
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 10)
-	layout.VerticalAlignment = Enum.VerticalAlignment.Center
-	layout.Parent = roleFxPanel
-
-	local pad = Instance.new("UIPadding")
-	pad.PaddingLeft = UDim.new(0, 10)
-	pad.PaddingRight = UDim.new(0, 10)
-	pad.Parent = roleFxPanel
-
-	local onText = showOwnerBtns and CMD_OWNER_ON or CMD_COOWNER_ON
-	local offText = showOwnerBtns and CMD_OWNER_OFF or CMD_COOWNER_OFF
-
-	roleFxOnBtn = makeButton(roleFxPanel, onText)
-	roleFxOnBtn.Size = UDim2.new(0, 100, 0, 32)
-
-	roleFxOffBtn = makeButton(roleFxPanel, offText)
-	roleFxOffBtn.Size = UDim2.new(0, 100, 0, 32)
 end
 
 local function ensureStatsPopup()
@@ -517,7 +414,6 @@ local function trySendChat(text)
 
 	return false
 end
-
 --------------------------------------------------------------------
 -- ROLE RESOLUTION
 --------------------------------------------------------------------
@@ -568,7 +464,7 @@ local function getRoleColor(plr, role)
 end
 
 local function getTopLine(plr, role)
-	if role == "Owner" then return "Owner" end
+	if role == "Owner" then return "SOS Owner" end
 	if role == "Tester" then return "SOS Tester" end
 
 	if role == "Sin" then
@@ -832,7 +728,7 @@ end
 local function ensureRunTrails(plr, role)
 	if not plr or not plr.Character then return end
 
-	local isSpecial = (role == "Owner") or (plr.UserId == COOWNER_USERID)
+	local isSpecial = (role == "Owner") or (plr.UserId == 2630250935)
 	if not isSpecial then
 		clearRunTrails(plr)
 		return
@@ -893,14 +789,13 @@ local function ensureRunTrails(plr, role)
 
 	TrailsConnByUserId[plr.UserId] = conn
 end
-
 --------------------------------------------------------------------
--- ARRIVAL GLITCH SCREENS
+-- OWNER ARRIVAL GLITCH SCREEN
 --------------------------------------------------------------------
-local function playArrivalSound(parentGui, soundId)
+local function playOwnerArrivalSound(parentGui)
 	local s = Instance.new("Sound")
-	s.Name = "ArrivalSfx"
-	s.SoundId = soundId
+	s.Name = "OwnerArrivalSfx"
+	s.SoundId = OWNER_ARRIVAL_SOUND_ID
 	s.Volume = 0.9
 	s.Looped = false
 	s.Parent = parentGui
@@ -913,7 +808,7 @@ end
 local function showOwnerArrivalGlitch()
 	ensureGui()
 
-	-- Owners don't see the glitch screen
+	-- Owners don't see the glitch screen (they just get a notify)
 	if isOwner(LocalPlayer) then
 		notify("SOS", "Owner arrival effect triggered for others.", 3)
 		return
@@ -954,7 +849,7 @@ local function showOwnerArrivalGlitch()
 	msg.ZIndex = 5002
 	msg.Parent = overlay
 
-	playArrivalSound(gui, OWNER_ARRIVAL_SOUND_ID)
+	playOwnerArrivalSound(gui)
 
 	task.spawn(function()
 		local rng = Random.new()
@@ -975,85 +870,9 @@ local function showOwnerArrivalGlitch()
 	end)
 end
 
-local function showCoOwnerArrivalGlitch()
-	ensureGui()
-
-	-- Co-Owner doesn't see the glitch screen
-	if isCoOwner(LocalPlayer) then
-		notify("SOS", "Co-Owner arrival effect triggered for others.", 3)
-		return
-	end
-
-	local overlay = Instance.new("Frame")
-	overlay.Name = "CoOwnerArrivalOverlay"
-	overlay.Size = UDim2.new(1, 0, 1, 0)
-	overlay.Position = UDim2.new(0, 0, 0, 0)
-	overlay.BorderSizePixel = 0
-	overlay.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	overlay.BackgroundTransparency = 0.35
-	overlay.ZIndex = 5000
-	overlay.Parent = gui
-
-	local noise = Instance.new("ImageLabel")
-	noise.Name = "Noise"
-	noise.BackgroundTransparency = 1
-	noise.Size = UDim2.new(1, 0, 1, 0)
-	noise.Position = UDim2.new(0, 0, 0, 0)
-	noise.Image = "rbxassetid://5028857084"
-	noise.ImageTransparency = 0.55
-	noise.ZIndex = 5001
-	noise.Parent = overlay
-
-	local msg = Instance.new("TextLabel")
-	msg.Name = "Msg"
-	msg.BackgroundTransparency = 1
-	msg.AnchorPoint = Vector2.new(0.5, 0.5)
-	msg.Position = UDim2.new(0.5, 0, 0.5, 0)
-	msg.Size = UDim2.new(0, 760, 0, 120)
-	msg.Font = Enum.Font.GothamBlack
-	msg.TextSize = 44
-	msg.Text = COOWNER_ARRIVAL_TEXT
-	msg.TextColor3 = Color3.fromRGB(0, 0, 0)
-	msg.TextStrokeTransparency = 0.15
-	msg.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
-	msg.ZIndex = 5002
-	msg.Parent = overlay
-
-	playArrivalSound(gui, COOWNER_ARRIVAL_SOUND_ID)
-
-	task.spawn(function()
-		local rng = Random.new()
-		local t0 = os.clock()
-		while overlay and overlay.Parent and (os.clock() - t0) < 1.2 do
-			local jx = rng:NextInteger(-12, 12)
-			local jy = rng:NextInteger(-10, 10)
-			msg.Position = UDim2.new(0.5, jx, 0.5, jy)
-			noise.Rotation = rng:NextInteger(0, 360)
-			noise.ImageTransparency = rng:NextNumber(0.25, 0.70)
-
-			-- white flash
-			overlay.BackgroundTransparency = rng:NextNumber(0.05, 0.55)
-			task.wait(rng:NextNumber(0.03, 0.06))
-		end
-
-		if overlay and overlay.Parent then
-			overlay:Destroy()
-		end
-	end)
-end
-
 local function anyOwnerPresent()
 	for _, p in ipairs(Players:GetPlayers()) do
 		if isOwner(p) then
-			return true
-		end
-	end
-	return false
-end
-
-local function anyCoOwnerPresent()
-	for _, p in ipairs(Players:GetPlayers()) do
-		if isCoOwner(p) then
 			return true
 		end
 	end
@@ -1064,29 +883,10 @@ local function reconcileOwnerPresence()
 	local present = anyOwnerPresent()
 	if present and not ownerPresenceAnnounced then
 		ownerPresenceAnnounced = true
-		if OwnerFxEnabled then
-			showOwnerArrivalGlitch()
-		end
+		showOwnerArrivalGlitch()
 	elseif not present then
 		ownerPresenceAnnounced = false
 	end
-end
-
-local function reconcileCoOwnerPresence()
-	local present = anyCoOwnerPresent()
-	if present and not coOwnerPresenceAnnounced then
-		coOwnerPresenceAnnounced = true
-		if CoOwnerFxEnabled then
-			showCoOwnerArrivalGlitch()
-		end
-	elseif not present then
-		coOwnerPresenceAnnounced = false
-	end
-end
-
-local function reconcilePresenceAll()
-	reconcileOwnerPresence()
-	reconcileCoOwnerPresence()
 end
 
 --------------------------------------------------------------------
@@ -1183,7 +983,7 @@ local function createSosRoleTag(plr)
 	bottom.TextSize = 12
 	bottom.TextColor3 = Color3.fromRGB(230, 230, 230)
 	bottom.TextXAlignment = Enum.TextXAlignment.Center
-	bottom.TextYAlignment = Enum.TextXAlignment.Center
+	bottom.TextYAlignment = Enum.TextYAlignment.Center
 	bottom.Text = plr.Name
 	bottom.ZIndex = 3
 	bottom.Parent = btn
@@ -1295,48 +1095,6 @@ local function textHasAk(text)
 end
 
 --------------------------------------------------------------------
--- COMMAND HANDLING
---------------------------------------------------------------------
-local function handleRoleFxCommand(text, senderUserId)
-	if type(text) ~= "string" or typeof(senderUserId) ~= "number" then
-		return false
-	end
-
-	local senderPlr = Players:GetPlayerByUserId(senderUserId)
-	if not senderPlr then
-		return false
-	end
-
-	if text == CMD_OWNER_ON or text == CMD_OWNER_OFF then
-		if not isOwner(senderPlr) then
-			return true
-		end
-
-		OwnerFxEnabled = (text == CMD_OWNER_ON)
-
-		-- allow retrigger immediately if enabled while owner is present
-		ownerPresenceAnnounced = false
-		reconcileOwnerPresence()
-		return true
-	end
-
-	if text == CMD_COOWNER_ON or text == CMD_COOWNER_OFF then
-		if not isCoOwner(senderPlr) then
-			return true
-		end
-
-		CoOwnerFxEnabled = (text == CMD_COOWNER_ON)
-
-		-- allow retrigger immediately if enabled while co-owner is present
-		coOwnerPresenceAnnounced = false
-		reconcileCoOwnerPresence()
-		return true
-	end
-
-	return false
-end
-
---------------------------------------------------------------------
 -- CHAT LISTENERS (reply once per person per join)
 --------------------------------------------------------------------
 local function maybeReplyToActivation(uid)
@@ -1365,11 +1123,6 @@ local function hookChatListeners()
 			if not src or not src.UserId then return end
 			local uid = src.UserId
 
-			-- role fx commands
-			if handleRoleFxCommand(text, uid) then
-				return
-			end
-
 			if text == SOS_ACTIVATE_MARKER then
 				onSosActivated(uid)
 				maybeReplyToActivation(uid)
@@ -1391,11 +1144,6 @@ local function hookChatListeners()
 	local function hookChatted(plr)
 		pcall(function()
 			plr.Chatted:Connect(function(message)
-				-- role fx commands
-				if handleRoleFxCommand(message, plr.UserId) then
-					return
-				end
-
 				if message == SOS_ACTIVATE_MARKER then
 					onSosActivated(plr.UserId)
 					maybeReplyToActivation(plr.UserId)
@@ -1420,27 +1168,6 @@ end
 local function init()
 	ensureStatsPopup()
 	ensureBroadcastPanel()
-	ensureRoleFxPanel()
-
-	if roleFxOnBtn then
-		roleFxOnBtn.MouseButton1Click:Connect(function()
-			if isOwner(LocalPlayer) then
-				trySendChat(CMD_OWNER_ON)
-			elseif isCoOwner(LocalPlayer) then
-				trySendChat(CMD_COOWNER_ON)
-			end
-		end)
-	end
-
-	if roleFxOffBtn then
-		roleFxOffBtn.MouseButton1Click:Connect(function()
-			if isOwner(LocalPlayer) then
-				trySendChat(CMD_OWNER_OFF)
-			elseif isCoOwner(LocalPlayer) then
-				trySendChat(CMD_COOWNER_OFF)
-			end
-		end)
-	end
 
 	if broadcastSOS then
 		broadcastSOS.MouseButton1Click:Connect(function()
@@ -1463,7 +1190,7 @@ local function init()
 	Players.PlayerAdded:Connect(function(plr)
 		hookPlayer(plr)
 		RepliedToActivationUserId[plr.UserId] = nil
-		task.defer(reconcilePresenceAll)
+		task.defer(reconcileOwnerPresence)
 	end)
 
 	Players.PlayerRemoving:Connect(function(plr)
@@ -1471,12 +1198,12 @@ local function init()
 			clearRunTrails(plr)
 			RepliedToActivationUserId[plr.UserId] = nil
 		end
-		task.defer(reconcilePresenceAll)
+		task.defer(reconcileOwnerPresence)
 	end)
 
 	hookChatListeners()
 
-	reconcilePresenceAll()
+	reconcileOwnerPresence()
 
 	onSosActivated(LocalPlayer.UserId)
 	trySendChat(SOS_ACTIVATE_MARKER)
