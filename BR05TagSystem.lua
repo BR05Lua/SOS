@@ -14,29 +14,10 @@
 --    - the sender is NOT you.
 --    Reply-per-person resets when they leave and rejoin.
 -- 3) If someone sends ¬, that sender also gets SOS tags.
--- 4) AK orb only shows if the player is SOS activated AND AK activated. Owners never show AK orb.
-
--- UI
--- Bottom-left broadcast buttons only visible to:
--- - Owner(s)
--- - Sin of Cinna (UserId 2630250935)
-
--- FX
--- Owner + Cinna get intense speed trails (only while moving).
---   Owner default = rainbow trails.
---   Cinna default = light blue faded to red.
---   Trail length grows with speed, capped at 20 studs.
-
--- Owner arrival
--- When an Owner is present, non-owners see a quick glitch screen:
---   Text: "He has Arrived"
---   Sound: rbxassetid://136954512002069
-
--- Co-Owner arrival
--- When Co-Owner is present, non-owners/non-coowners see a quick glitch screen:
---   Text: "Hes Behind You"
---   Sound: rbxassetid://119023903778140
---   Flash white
+-- 4) AK tag is COMPLETELY independent:
+--    - If someone says ؍ (or ؍؍؍ or contains ؍), they get the AK orb.
+--    - No SOS activation required.
+--    - AK orb shows ABOVE the SOS role tag if both exist.
 
 --------------------------------------------------------------------
 -- SERVICES
@@ -66,7 +47,7 @@ local TAG_W, TAG_H = 144, 36
 local TAG_OFFSET_Y = 3
 
 local ORB_SIZE = 18
-local ORB_OFFSET_Y = 3.35
+local ORB_OFFSET_Y = 6.2 -- higher than role tag so it sits above
 
 --------------------------------------------------------------------
 -- ARRIVAL FX
@@ -117,23 +98,18 @@ local SinProfiles = {
 	[8956134409] = { SinName = "Cars", Color = Color3.fromRGB(0, 255, 0) },
 }
 
--- OG profiles (optional)
 local OgProfiles = {
-	-- [123456789] = { OgName = "OG", Color = Color3.fromRGB(160,220,255) },
+	-- empty by default
 }
 
--- Custom tag profiles (used for Co-Owner)
 local CustomTags = {
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(245, 245, 245) },
 }
 
 --------------------------------------------------------------------
--- SPEED TRAILS (Owner + Cinna)
+-- FX (Owner + Co-Owner)
 --------------------------------------------------------------------
-local TRAIL_FOLDER_NAME = "SOS_RunTrails"
-local TRAIL_MAX_STUDS = 20
-local TRAIL_LEN_PER_SPEED = 0.7
-local TRAIL_MIN_SPEED = 1.5
+local FX_FOLDER_NAME = "SOS_SpecialFX"
 
 -- Commands (sent in chat by buttons)
 local CMD_OWNER_ON = "Owner_on"
@@ -141,9 +117,13 @@ local CMD_OWNER_OFF = "Owner_off"
 local CMD_COOWNER_ON = "CoOwner_on"
 local CMD_COOWNER_OFF = "CoOwner_off"
 
--- Optional color commands (also sent by the slide-out menu)
+-- Color commands
 local CMD_OWNER_COLOR_PREFIX = "Owner_color:"
 local CMD_COOWNER_COLOR_PREFIX = "CoOwner_color:"
+
+-- Effect commands
+local CMD_OWNER_FX_PREFIX = "Owner_fx:"
+local CMD_COOWNER_FX_PREFIX = "CoOwner_fx:"
 
 --------------------------------------------------------------------
 -- STATE
@@ -151,20 +131,22 @@ local CMD_COOWNER_COLOR_PREFIX = "CoOwner_color:"
 local SosUsers = {}
 local AkUsers = {}
 
--- Warmup: do NOT auto-reply on the very first activation we see
 local SeenFirstActivation = false
-
--- Reply only once per person per join
 local RepliedToActivationUserId = {}
 
--- Trails toggle + color modes, synced via chat commands
-local TrailsEnabled = {
+local FxEnabled = {
 	Owner = true,
 	CoOwner = true,
 }
-local TrailColorMode = {
+
+local FxColorMode = {
 	Owner = "Rainbow",
-	CoOwner = "BlueRed",
+	CoOwner = "Aqua",
+}
+
+local FxMode = {
+	Owner = "Lines",   -- Lines | Lighting | Glitch
+	CoOwner = "Lines", -- Lines | Lighting | Glitch
 }
 
 local gui
@@ -179,12 +161,15 @@ local sfxPanel
 local sfxOnBtn
 local sfxOffBtn
 
--- Owner/CoOwner presence state
+local trailPanel
+local trailArrow
+local trailOpen = false
+local trailTween = nil
+
 local ownerPresenceAnnounced = false
 local coOwnerPresenceAnnounced = false
 
--- Trail connections
-local TrailsConnByUserId = {}
+local FxConnByUserId = {}
 
 --------------------------------------------------------------------
 -- UI HELPERS
@@ -235,55 +220,6 @@ local function ensureGui()
 	return gui
 end
 
-local function notify(titleText, bodyText, seconds)
-	ensureGui()
-	local dur = seconds or 2.2
-
-	local box = Instance.new("Frame")
-	box.Name = "SOS_Notify"
-	box.AnchorPoint = Vector2.new(0.5, 0)
-	box.Position = UDim2.new(0.5, 0, 0, 18)
-	box.Size = UDim2.new(0, 420, 0, 70)
-	box.BorderSizePixel = 0
-	box.Parent = gui
-	makeCorner(box, 14)
-	makeGlass(box)
-	makeStroke(box, 2, Color3.fromRGB(200, 40, 40), 0.12)
-	box.ZIndex = 2000
-
-	local title = Instance.new("TextLabel")
-	title.BackgroundTransparency = 1
-	title.Position = UDim2.new(0, 14, 0, 8)
-	title.Size = UDim2.new(1, -28, 0, 22)
-	title.Font = Enum.Font.GothamBold
-	title.TextSize = 16
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextColor3 = Color3.fromRGB(245, 245, 245)
-	title.Text = titleText or "Notice"
-	title.ZIndex = 2001
-	title.Parent = box
-
-	local body = Instance.new("TextLabel")
-	body.BackgroundTransparency = 1
-	body.Position = UDim2.new(0, 14, 0, 30)
-	body.Size = UDim2.new(1, -28, 0, 34)
-	body.Font = Enum.Font.Gotham
-	body.TextSize = 14
-	body.TextXAlignment = Enum.TextXAlignment.Left
-	body.TextYAlignment = Enum.TextYAlignment.Top
-	body.TextWrapped = true
-	body.TextColor3 = Color3.fromRGB(225, 225, 225)
-	body.Text = bodyText or ""
-	body.ZIndex = 2001
-	body.Parent = box
-
-	task.delay(dur, function()
-		if box and box.Parent then
-			box:Destroy()
-		end
-	end)
-end
-
 local function makeButton(parent, txt)
 	local b = Instance.new("TextButton")
 	b.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
@@ -321,17 +257,8 @@ local function canSeeBroadcastButtons()
 	return LocalPlayer.UserId == 2630250935
 end
 --------------------------------------------------------------------
--- LEFT SLIDE-OUT MENU (SOS HUD STYLE)
+-- CHAT SEND
 --------------------------------------------------------------------
-local trailPanel
-local trailArrow
-local trailOpen = false
-local trailTween = nil
-
-local function canSeeTrailMenu()
-	return isOwner(LocalPlayer) or isCoOwner(LocalPlayer)
-end
-
 local function trySendChat(text)
 	-- TextChatService
 	do
@@ -371,6 +298,71 @@ local function trySendChat(text)
 	return false
 end
 
+--------------------------------------------------------------------
+-- COLOUR PARSING (supports named + HEX + rgb)
+--------------------------------------------------------------------
+local function parseHexColor(str)
+	if type(str) ~= "string" then return nil end
+	str = str:gsub("%s+", "")
+	if str:sub(1, 1) == "#" then
+		str = str:sub(2)
+	end
+	if #str ~= 6 then return nil end
+
+	local r = tonumber(str:sub(1, 2), 16)
+	local g = tonumber(str:sub(3, 4), 16)
+	local b = tonumber(str:sub(5, 6), 16)
+	if not r or not g or not b then return nil end
+
+	return Color3.fromRGB(r, g, b)
+end
+
+local function parseRgbFunc(str)
+	if type(str) ~= "string" then return nil end
+	local s = str:lower()
+	local r, g, b = s:match("^rgb%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*%)$")
+	r, g, b = tonumber(r), tonumber(g), tonumber(b)
+	if not r or not g or not b then return nil end
+	r = math.clamp(r, 0, 255)
+	g = math.clamp(g, 0, 255)
+	b = math.clamp(b, 0, 255)
+	return Color3.fromRGB(r, g, b)
+end
+
+--------------------------------------------------------------------
+-- LEFT SLIDE-OUT MENU (REPLACED palette)
+--------------------------------------------------------------------
+local function canSeeTrailMenu()
+	return isOwner(LocalPlayer) or isCoOwner(LocalPlayer)
+end
+
+local function makeColorChip(parent, label, color3, onClick)
+	local b = Instance.new("TextButton")
+	b.Name = "Chip_" .. label
+	b.Size = UDim2.new(0, 34, 0, 24)
+	b.BackgroundColor3 = color3
+	b.BackgroundTransparency = 0.05
+	b.BorderSizePixel = 0
+	b.Text = ""
+	b.AutoButtonColor = true
+	b.Parent = parent
+	makeCorner(b, 8)
+	makeStroke(b, 1, Color3.fromRGB(0, 0, 0), 0.35)
+
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Size = UDim2.new(1, 0, 1, 0)
+	t.Font = Enum.Font.GothamBold
+	t.TextSize = 10
+	t.TextColor3 = Color3.fromRGB(245, 245, 245)
+	t.TextStrokeTransparency = 0.6
+	t.Text = label
+	t.Parent = b
+
+	b.MouseButton1Click:Connect(onClick)
+	return b
+end
+
 local function ensureTrailMenu()
 	ensureGui()
 
@@ -386,7 +378,7 @@ local function ensureTrailMenu()
 		return
 	end
 
-	local PANEL_W, PANEL_H = 250, 170
+	local PANEL_W, PANEL_H = 270, 240
 	local ARROW_W = 34
 
 	trailPanel = Instance.new("Frame")
@@ -459,9 +451,39 @@ local function ensureTrailMenu()
 	local offBtn = makeButton(btnRow, "OFF")
 	offBtn.Size = UDim2.new(0, 90, 0, 32)
 
+	local fxLabel = Instance.new("TextLabel")
+	fxLabel.BackgroundTransparency = 1
+	fxLabel.Position = UDim2.new(0, 12, 0, 104)
+	fxLabel.Size = UDim2.new(1, -(ARROW_W + 18), 0, 16)
+	fxLabel.Font = Enum.Font.GothamBold
+	fxLabel.TextSize = 12
+	fxLabel.TextXAlignment = Enum.TextXAlignment.Left
+	fxLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
+	fxLabel.Text = "Effect"
+	fxLabel.Parent = trailPanel
+
+	local fxRow = Instance.new("Frame")
+	fxRow.BackgroundTransparency = 1
+	fxRow.Position = UDim2.new(0, 10, 0, 124)
+	fxRow.Size = UDim2.new(1, -(ARROW_W + 20), 0, 36)
+	fxRow.Parent = trailPanel
+
+	local fxLayout = Instance.new("UIListLayout")
+	fxLayout.FillDirection = Enum.FillDirection.Horizontal
+	fxLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	fxLayout.Padding = UDim.new(0, 10)
+	fxLayout.Parent = fxRow
+
+	local fxLines = makeButton(fxRow, "Lines")
+	fxLines.Size = UDim2.new(0, 66, 0, 32)
+	local fxLight = makeButton(fxRow, "Light")
+	fxLight.Size = UDim2.new(0, 66, 0, 32)
+	local fxGlitch = makeButton(fxRow, "Glitch")
+	fxGlitch.Size = UDim2.new(0, 66, 0, 32)
+
 	local colorsLabel = Instance.new("TextLabel")
 	colorsLabel.BackgroundTransparency = 1
-	colorsLabel.Position = UDim2.new(0, 12, 0, 104)
+	colorsLabel.Position = UDim2.new(0, 12, 0, 168)
 	colorsLabel.Size = UDim2.new(1, -(ARROW_W + 18), 0, 16)
 	colorsLabel.Font = Enum.Font.GothamBold
 	colorsLabel.TextSize = 12
@@ -470,72 +492,111 @@ local function ensureTrailMenu()
 	colorsLabel.Text = "Colour"
 	colorsLabel.Parent = trailPanel
 
-	local colorRow = Instance.new("Frame")
-	colorRow.BackgroundTransparency = 1
-	colorRow.Position = UDim2.new(0, 10, 0, 124)
-	colorRow.Size = UDim2.new(1, -(ARROW_W + 20), 0, 36)
-	colorRow.Parent = trailPanel
+	local colorArea = Instance.new("Frame")
+	colorArea.BackgroundTransparency = 1
+	colorArea.Position = UDim2.new(0, 10, 0, 188)
+	colorArea.Size = UDim2.new(1, -(ARROW_W + 20), 0, 42)
+	colorArea.Parent = trailPanel
 
-	local colorLayout = Instance.new("UIListLayout")
-	colorLayout.FillDirection = Enum.FillDirection.Horizontal
-	colorLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	colorLayout.Padding = UDim.new(0, 10)
-	colorLayout.Parent = colorRow
-
-	local c1 = makeButton(colorRow, "1")
-	c1.Size = UDim2.new(0, 50, 0, 32)
-	local c2 = makeButton(colorRow, "2")
-	c2.Size = UDim2.new(0, 50, 0, 32)
-	local c3 = makeButton(colorRow, "3")
-	c3.Size = UDim2.new(0, 50, 0, 32)
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0, 34, 0, 24)
+	grid.CellPadding = UDim2.new(0, 8, 0, 8)
+	grid.FillDirection = Enum.FillDirection.Horizontal
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	grid.VerticalAlignment = Enum.VerticalAlignment.Top
+	grid.Parent = colorArea
 
 	local function sendOn()
 		if isOwner(LocalPlayer) then
-			TrailsEnabled.Owner = true
+			FxEnabled.Owner = true
 			trySendChat(CMD_OWNER_ON)
 		elseif isCoOwner(LocalPlayer) then
-			TrailsEnabled.CoOwner = true
+			FxEnabled.CoOwner = true
 			trySendChat(CMD_COOWNER_ON)
 		end
 	end
 
 	local function sendOff()
 		if isOwner(LocalPlayer) then
-			TrailsEnabled.Owner = false
+			FxEnabled.Owner = false
 			trySendChat(CMD_OWNER_OFF)
 		elseif isCoOwner(LocalPlayer) then
-			TrailsEnabled.CoOwner = false
+			FxEnabled.CoOwner = false
 			trySendChat(CMD_COOWNER_OFF)
 		end
 	end
 
 	local function sendColor(mode)
 		if isOwner(LocalPlayer) then
-			TrailColorMode.Owner = mode
+			FxColorMode.Owner = mode
 			trySendChat(CMD_OWNER_COLOR_PREFIX .. mode)
 		elseif isCoOwner(LocalPlayer) then
-			TrailColorMode.CoOwner = mode
+			FxColorMode.CoOwner = mode
 			trySendChat(CMD_COOWNER_COLOR_PREFIX .. mode)
+		end
+	end
+
+	local function sendFxMode(mode)
+		if isOwner(LocalPlayer) then
+			FxMode.Owner = mode
+			trySendChat(CMD_OWNER_FX_PREFIX .. mode)
+		elseif isCoOwner(LocalPlayer) then
+			FxMode.CoOwner = mode
+			trySendChat(CMD_COOWNER_FX_PREFIX .. mode)
 		end
 	end
 
 	onBtn.MouseButton1Click:Connect(sendOn)
 	offBtn.MouseButton1Click:Connect(sendOff)
 
-	if isOwner(LocalPlayer) then
-		c1.Text = "RGB"
-		c2.Text = "YLW"
-		c3.Text = "RED"
-		c1.MouseButton1Click:Connect(function() sendColor("Rainbow") end)
-		c2.MouseButton1Click:Connect(function() sendColor("Yellow") end)
-		c3.MouseButton1Click:Connect(function() sendColor("Red") end)
-	else
-		c1.Text = "B/R"
-		c2.Text = "CYN"
-		c3.Text = "GRN"
-		c1.MouseButton1Click:Connect(function() sendColor("BlueRed") end)
-		c2.MouseButton1Click:Connect(function() sendColor("Cyan") end)
-		c3.MouseButton1Click:Connect(function() sendColor("Green") end)
+	fxLines.MouseButton1Click:Connect(function() sendFxMode("Lines") end)
+	fxLight.MouseButton1Click:Connect(function() sendFxMode("Lighting") end)
+	fxGlitch.MouseButton1Click:Connect(function() sendFxMode("Glitch") end)
+
+	-- REPLACED COLOUR SET (no old ones kept)
+	-- You can also broadcast custom colours manually:
+	-- Owner_color:#RRGGBB or Owner_color:rgb(255,0,0)
+	-- CoOwner_color:#RRGGBB or CoOwner_color:rgb(255,0,0)
+	local palette = {
+		{ "RGB", Color3.fromRGB(30, 30, 30), "Rainbow" },
+
+		{ "ICE", Color3.fromRGB(180, 245, 255), "Ice" },
+		{ "AQU", Color3.fromRGB(80, 255, 255), "Aqua" },
+		{ "SKY", Color3.fromRGB(120, 190, 255), "Sky" },
+		{ "ROY", Color3.fromRGB(80, 150, 255), "Royal" },
+		{ "NAV", Color3.fromRGB(35, 55, 110), "Navy" },
+
+		{ "LIM", Color3.fromRGB(170, 255, 80), "Lime" },
+		{ "NEO", Color3.fromRGB(60, 255, 120), "Neon" },
+		{ "MNT", Color3.fromRGB(120, 255, 200), "Mint" },
+		{ "GRN", Color3.fromRGB(60, 200, 90), "Green" },
+		{ "OLV", Color3.fromRGB(140, 180, 60), "Olive" },
+
+		{ "SUN", Color3.fromRGB(255, 220, 80), "Sun" },
+		{ "GLD", Color3.fromRGB(255, 195, 60), "Gold" },
+		{ "AMB", Color3.fromRGB(255, 160, 60), "Amber" },
+		{ "ORG", Color3.fromRGB(255, 120, 60), "Orange" },
+		{ "COP", Color3.fromRGB(190, 110, 70), "Copper" },
+
+		{ "RED", Color3.fromRGB(255, 60, 60), "Red" },
+		{ "CRS", Color3.fromRGB(220, 40, 70), "Crimson" },
+		{ "ROS", Color3.fromRGB(255, 120, 150), "Rose" },
+		{ "PNK", Color3.fromRGB(255, 120, 210), "Pink" },
+		{ "MAG", Color3.fromRGB(255, 60, 255), "Magenta" },
+
+		{ "VIO", Color3.fromRGB(160, 120, 255), "Violet" },
+		{ "PRP", Color3.fromRGB(120, 60, 200), "Purple" },
+		{ "LAV", Color3.fromRGB(200, 170, 255), "Lavender" },
+		{ "WHT", Color3.fromRGB(245, 245, 245), "White" },
+		{ "SLV", Color3.fromRGB(170, 170, 170), "Silver" },
+	}
+
+	for _, item in ipairs(palette) do
+		local label, col, mode = item[1], item[2], item[3]
+		makeColorChip(colorArea, label, col, function()
+			sendColor(mode)
+		end)
 	end
 
 	local openPos = UDim2.new(0, 10, 0.5, 0)
@@ -660,26 +721,26 @@ local function ensureSfxPanel()
 
 	sfxOnBtn.MouseButton1Click:Connect(function()
 		if isOwner(LocalPlayer) then
-			TrailsEnabled.Owner = true
+			FxEnabled.Owner = true
 			trySendChat(CMD_OWNER_ON)
 		elseif isCoOwner(LocalPlayer) then
-			TrailsEnabled.CoOwner = true
+			FxEnabled.CoOwner = true
 			trySendChat(CMD_COOWNER_ON)
 		end
 	end)
 
 	sfxOffBtn.MouseButton1Click:Connect(function()
 		if isOwner(LocalPlayer) then
-			TrailsEnabled.Owner = false
+			FxEnabled.Owner = false
 			trySendChat(CMD_OWNER_OFF)
 		elseif isCoOwner(LocalPlayer) then
-			TrailsEnabled.CoOwner = false
+			FxEnabled.CoOwner = false
 			trySendChat(CMD_COOWNER_OFF)
 		end
 	end)
 end
 --------------------------------------------------------------------
--- STATS POPUP
+-- STATS POPUP + TAG UTIL
 --------------------------------------------------------------------
 local function ensureStatsPopup()
 	ensureGui()
@@ -968,21 +1029,20 @@ local function createOwnerGlitchText(label)
 	end)
 end
 --------------------------------------------------------------------
--- SPEED TRAILS (INTENSE)
+-- SPECIAL FX CORE (LINES / LIGHTING / GLITCH)
 --------------------------------------------------------------------
-local function disconnectTrailsConn(userId)
-	local c = TrailsConnByUserId[userId]
+local function disconnectFxConn(userId)
+	local c = FxConnByUserId[userId]
 	if c then
 		pcall(function() c:Disconnect() end)
 	end
-	TrailsConnByUserId[userId] = nil
+	FxConnByUserId[userId] = nil
 end
 
-local function clearRunTrails(plr)
+local function clearSpecialFx(plr)
 	if not plr or not plr.Character then return end
-	disconnectTrailsConn(plr.UserId)
-
-	local folder = plr.Character:FindFirstChild(TRAIL_FOLDER_NAME)
+	disconnectFxConn(plr.UserId)
+	local folder = plr.Character:FindFirstChild(FX_FOLDER_NAME)
 	if folder then
 		folder:Destroy()
 	end
@@ -1006,19 +1066,16 @@ local function makeTrailOnPart(part, parentFolder)
 	tr.FaceCamera = true
 	tr.LightEmission = 1
 	tr.Brightness = 2
-
 	tr.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.08),
 		NumberSequenceKeypoint.new(0.45, 0.22),
 		NumberSequenceKeypoint.new(1, 1.00),
 	})
-
 	tr.WidthScale = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.65),
 		NumberSequenceKeypoint.new(0.6, 0.25),
 		NumberSequenceKeypoint.new(1, 0.00),
 	})
-
 	tr.Lifetime = 0.12
 	tr.Enabled = false
 	tr.Parent = parentFolder
@@ -1026,7 +1083,7 @@ local function makeTrailOnPart(part, parentFolder)
 	return tr
 end
 
-local function applyOwnerRainbow(trail, hue)
+local function applyRainbow(trail, hue)
 	local c0 = Color3.fromHSV(hue % 1, 1, 1)
 	local c1 = Color3.fromHSV((hue + 0.18) % 1, 1, 1)
 	trail.Color = ColorSequence.new(c0, c1)
@@ -1036,56 +1093,91 @@ local function setTrailStatic(trail, c0, c1)
 	trail.Color = ColorSequence.new(c0, c1 or c0)
 end
 
-local function resolveOwnerMode()
-	return TrailColorMode.Owner or "Rainbow"
+local function resolveColorMode(isOwnerRole)
+	return isOwnerRole and (FxColorMode.Owner or "Rainbow") or (FxColorMode.CoOwner or "Aqua")
 end
 
-local function resolveCoOwnerMode()
-	return TrailColorMode.CoOwner or "BlueRed"
+local function namedColorPair(mode)
+	if mode == "Ice" then return Color3.fromRGB(180, 245, 255), Color3.fromRGB(120, 210, 255), false end
+	if mode == "Aqua" then return Color3.fromRGB(80, 255, 255), Color3.fromRGB(120, 200, 255), false end
+	if mode == "Sky" then return Color3.fromRGB(120, 190, 255), Color3.fromRGB(80, 150, 255), false end
+	if mode == "Royal" then return Color3.fromRGB(80, 150, 255), Color3.fromRGB(120, 210, 255), false end
+	if mode == "Navy" then return Color3.fromRGB(35, 55, 110), Color3.fromRGB(80, 100, 160), false end
+
+	if mode == "Lime" then return Color3.fromRGB(170, 255, 80), Color3.fromRGB(80, 220, 120), false end
+	if mode == "Neon" then return Color3.fromRGB(60, 255, 120), Color3.fromRGB(120, 255, 200), false end
+	if mode == "Mint" then return Color3.fromRGB(120, 255, 200), Color3.fromRGB(80, 220, 170), false end
+	if mode == "Green" then return Color3.fromRGB(60, 200, 90), Color3.fromRGB(120, 255, 120), false end
+	if mode == "Olive" then return Color3.fromRGB(140, 180, 60), Color3.fromRGB(90, 140, 50), false end
+
+	if mode == "Sun" then return Color3.fromRGB(255, 220, 80), Color3.fromRGB(255, 180, 80), false end
+	if mode == "Gold" then return Color3.fromRGB(255, 195, 60), Color3.fromRGB(255, 140, 60), false end
+	if mode == "Amber" then return Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 210, 120), false end
+	if mode == "Orange" then return Color3.fromRGB(255, 120, 60), Color3.fromRGB(255, 170, 120), false end
+	if mode == "Copper" then return Color3.fromRGB(190, 110, 70), Color3.fromRGB(230, 160, 120), false end
+
+	if mode == "Red" then return Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 120, 120), false end
+	if mode == "Crimson" then return Color3.fromRGB(220, 40, 70), Color3.fromRGB(255, 80, 120), false end
+	if mode == "Rose" then return Color3.fromRGB(255, 120, 150), Color3.fromRGB(255, 170, 200), false end
+	if mode == "Pink" then return Color3.fromRGB(255, 120, 210), Color3.fromRGB(255, 170, 235), false end
+	if mode == "Magenta" then return Color3.fromRGB(255, 60, 255), Color3.fromRGB(200, 120, 255), false end
+
+	if mode == "Violet" then return Color3.fromRGB(160, 120, 255), Color3.fromRGB(210, 180, 255), false end
+	if mode == "Purple" then return Color3.fromRGB(120, 60, 200), Color3.fromRGB(200, 140, 255), false end
+	if mode == "Lavender" then return Color3.fromRGB(200, 170, 255), Color3.fromRGB(235, 225, 255), false end
+	if mode == "White" then return Color3.fromRGB(245, 245, 245), Color3.fromRGB(200, 200, 200), false end
+	if mode == "Silver" then return Color3.fromRGB(170, 170, 170), Color3.fromRGB(245, 245, 245), false end
+
+	return nil
 end
 
-local function applyOwnerMode(trail, hue)
-	local mode = resolveOwnerMode()
+local function colorPairFromMode(mode, hue)
 	if mode == "Rainbow" then
-		applyOwnerRainbow(trail, hue)
-	elseif mode == "Yellow" then
-		setTrailStatic(trail, Color3.fromRGB(255, 255, 80), Color3.fromRGB(255, 220, 60))
-	elseif mode == "Red" then
-		setTrailStatic(trail, Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 120, 120))
-	else
-		applyOwnerRainbow(trail, hue)
+		local c0 = Color3.fromHSV(hue % 1, 1, 1)
+		local c1 = Color3.fromHSV((hue + 0.18) % 1, 1, 1)
+		return c0, c1, true
 	end
+
+	-- HEX support (#RRGGBB)
+	local hex = parseHexColor(mode)
+	if hex then
+		return hex, hex, false
+	end
+
+	-- rgb(255,0,0) support
+	local rgb = parseRgbFunc(mode)
+	if rgb then
+		return rgb, rgb, false
+	end
+
+	local named = namedColorPair(mode)
+	if named then
+		return named
+	end
+
+	-- safe fallback
+	return Color3.fromRGB(200, 235, 255), Color3.fromRGB(255, 120, 120), false
 end
 
-local function applyCoOwnerMode(trail)
-	local mode = resolveCoOwnerMode()
-	if mode == "BlueRed" then
-		setTrailStatic(trail, Color3.fromRGB(200, 235, 255), Color3.fromRGB(255, 120, 120))
-	elseif mode == "Cyan" then
-		setTrailStatic(trail, Color3.fromRGB(120, 255, 255), Color3.fromRGB(80, 180, 255))
-	elseif mode == "Green" then
-		setTrailStatic(trail, Color3.fromRGB(120, 255, 120), Color3.fromRGB(40, 200, 90))
-	else
-		setTrailStatic(trail, Color3.fromRGB(200, 235, 255), Color3.fromRGB(255, 120, 120))
-	end
+local function resolveFxMode(isOwnerRole)
+	return isOwnerRole and (FxMode.Owner or "Lines") or (FxMode.CoOwner or "Lines")
 end
 
-local function ensureRunTrails(plr, role)
+local function ensureSpecialFx(plr, role)
 	if not plr or not plr.Character then return end
 
 	local isOwnerRole = (role == "Owner")
-	local isCinnaRole = (plr.UserId == 2630250935)
+	local isCoOwnerRole = (plr.UserId == 2630250935)
+	local isSpecial = isOwnerRole or isCoOwnerRole
 
-	local enabled = true
-	if isOwnerRole then
-		enabled = TrailsEnabled.Owner ~= false
-	elseif isCinnaRole then
-		enabled = TrailsEnabled.CoOwner ~= false
+	if not isSpecial then
+		clearSpecialFx(plr)
+		return
 	end
 
-	local isSpecial = isOwnerRole or isCinnaRole
-	if (not isSpecial) or (not enabled) then
-		clearRunTrails(plr)
+	local enabled = isOwnerRole and (FxEnabled.Owner ~= false) or (FxEnabled.CoOwner ~= false)
+	if not enabled then
+		clearSpecialFx(plr)
 		return
 	end
 
@@ -1094,65 +1186,110 @@ local function ensureRunTrails(plr, role)
 	local hrp = char:FindFirstChild("HumanoidRootPart")
 	if not hum or not hrp then return end
 
-	clearRunTrails(plr)
+	clearSpecialFx(plr)
 
 	local folder = Instance.new("Folder")
-	folder.Name = TRAIL_FOLDER_NAME
+	folder.Name = FX_FOLDER_NAME
 	folder.Parent = char
 
-	local trails = {}
-	for _, inst in ipairs(char:GetDescendants()) do
-		if inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart" then
-			trails[#trails + 1] = makeTrailOnPart(inst, folder)
+	local mode = resolveFxMode(isOwnerRole)
+
+	local trails = nil
+	local light = nil
+	local hl = nil
+	local hue = 0
+
+	if mode == "Lines" then
+		trails = {}
+		for _, inst in ipairs(char:GetDescendants()) do
+			if inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart" then
+				trails[#trails + 1] = makeTrailOnPart(inst, folder)
+			end
 		end
+	elseif mode == "Lighting" then
+		light = Instance.new("PointLight")
+		light.Name = "SOS_FxLight"
+		light.Range = 16
+		light.Brightness = 0
+		light.Enabled = true
+		light.Parent = hrp
+	elseif mode == "Glitch" then
+		hl = Instance.new("Highlight")
+		hl.Name = "SOS_FxHighlight"
+		hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		hl.FillTransparency = 0.35
+		hl.OutlineTransparency = 0.1
+		hl.Parent = folder
+		hl.Adornee = char
 	end
 
-	local hue = 0
 	local conn
 	conn = RunService.RenderStepped:Connect(function(dt)
 		if not folder or not folder.Parent then
-			disconnectTrailsConn(plr.UserId)
+			disconnectFxConn(plr.UserId)
 			return
 		end
 		if not hum.Parent or not hrp.Parent then
-			disconnectTrailsConn(plr.UserId)
+			disconnectFxConn(plr.UserId)
 			return
 		end
 
-		-- live enable check (in case commands toggled)
-		if isOwnerRole and TrailsEnabled.Owner == false then
-			clearRunTrails(plr)
+		if isOwnerRole and FxEnabled.Owner == false then
+			clearSpecialFx(plr)
 			return
 		end
-		if isCinnaRole and TrailsEnabled.CoOwner == false then
-			clearRunTrails(plr)
+		if isCoOwnerRole and FxEnabled.CoOwner == false then
+			clearSpecialFx(plr)
 			return
 		end
 
 		local speed = hrp.Velocity.Magnitude
-		local moving = speed > TRAIL_MIN_SPEED
+		local moving = speed > 1.5
 
-		for _, tr in ipairs(trails) do
-			tr.Enabled = moving
+		local cmode = resolveColorMode(isOwnerRole)
+		hue = (hue + dt * 0.95) % 1
+		local c0, c1, isRainbow = colorPairFromMode(cmode, hue)
+
+		if trails then
+			for _, tr in ipairs(trails) do
+				tr.Enabled = moving
+			end
+			if moving then
+				local desiredLen = math.clamp(speed * 0.7, 0, 20)
+				local lifetime = desiredLen / math.max(speed, 1)
+				lifetime = math.clamp(lifetime, 0.10, 0.45)
+
+				for _, tr in ipairs(trails) do
+					tr.Lifetime = lifetime
+					if isRainbow then
+						applyRainbow(tr, hue)
+					else
+						setTrailStatic(tr, c0, c1)
+					end
+				end
+			end
 		end
-		if not moving then return end
 
-		local desiredLen = math.clamp(speed * TRAIL_LEN_PER_SPEED, 0, TRAIL_MAX_STUDS)
-		local lifetime = desiredLen / math.max(speed, 1)
-		lifetime = math.clamp(lifetime, 0.10, 0.45)
+		if light then
+			light.Brightness = moving and 2.6 or 0
+			light.Color = c0
+		end
 
-		for _, tr in ipairs(trails) do
-			tr.Lifetime = lifetime
-			if isOwnerRole then
-				hue = (hue + dt * 0.95) % 1
-				applyOwnerMode(tr, hue)
+		if hl then
+			local pulse = (math.sin(os.clock() * 10) * 0.5 + 0.5)
+			hl.FillTransparency = 0.25 + (pulse * 0.35)
+			hl.OutlineTransparency = 0.05 + (pulse * 0.25)
+			if isRainbow then
+				hl.FillColor = Color3.fromHSV(hue, 1, 1)
+				hl.OutlineColor = Color3.fromHSV((hue + 0.25) % 1, 1, 1)
 			else
-				applyCoOwnerMode(tr)
+				hl.FillColor = c0
+				hl.OutlineColor = c1
 			end
 		end
 	end)
 
-	TrailsConnByUserId[plr.UserId] = conn
+	FxConnByUserId[plr.UserId] = conn
 end
 
 --------------------------------------------------------------------
@@ -1173,7 +1310,9 @@ end
 
 local function showOwnerArrivalGlitch()
 	ensureGui()
-	if isOwner(LocalPlayer) then
+
+	-- IMPORTANT: Co-Owner cannot see the Owner intro either
+	if isOwner(LocalPlayer) or isCoOwner(LocalPlayer) then
 		return
 	end
 
@@ -1326,7 +1465,7 @@ local function createSosRoleTag(plr)
 	if not char then return end
 
 	local role = getSosRole(plr)
-	ensureRunTrails(plr, role)
+	ensureSpecialFx(plr, role)
 
 	if not role then
 		destroyTagGui(char, "SOS_RoleTag")
@@ -1403,7 +1542,6 @@ local function createSosRoleTag(plr)
 		top.TextColor3 = color
 	end
 
-	-- Username line (fixed to always show)
 	local bottom = Instance.new("TextLabel")
 	bottom.BackgroundTransparency = 1
 	bottom.Size = UDim2.new(1, -10, 0, 16)
@@ -1424,17 +1562,6 @@ local function createAkOrbTag(plr)
 	if not plr then return end
 	local char = plr.Character
 	if not char then return end
-
-	-- Owners never show AK orb
-	if isOwner(plr) then
-		destroyTagGui(char, "SOS_AKTag")
-		return
-	end
-
-	if not SosUsers[plr.UserId] then
-		destroyTagGui(char, "SOS_AKTag")
-		return
-	end
 
 	if not AkUsers[plr.UserId] then
 		destroyTagGui(char, "SOS_AKTag")
@@ -1525,7 +1652,78 @@ local function textHasAk(text)
 end
 
 --------------------------------------------------------------------
--- CHAT HANDLING (ACTIVATION + COMMANDS)
+-- COMMANDS (OWNER/CO-OWNER ONLY)
+--------------------------------------------------------------------
+local function applyCommandFrom(uid, text)
+	local plr = Players:GetPlayerByUserId(uid)
+
+	if text == CMD_OWNER_ON and plr and isOwner(plr) then
+		FxEnabled.Owner = true
+		if plr.Character then refreshAllTagsForPlayer(plr) end
+		return true
+	end
+	if text == CMD_OWNER_OFF and plr and isOwner(plr) then
+		FxEnabled.Owner = false
+		for _, p in ipairs(Players:GetPlayers()) do
+			if isOwner(p) then
+				clearSpecialFx(p)
+			end
+		end
+		return true
+	end
+
+	if text == CMD_COOWNER_ON and plr and isCoOwner(plr) then
+		FxEnabled.CoOwner = true
+		if plr.Character then refreshAllTagsForPlayer(plr) end
+		return true
+	end
+	if text == CMD_COOWNER_OFF and plr and isCoOwner(plr) then
+		FxEnabled.CoOwner = false
+		if plr then clearSpecialFx(plr) end
+		return true
+	end
+
+	if text:sub(1, #CMD_OWNER_COLOR_PREFIX) == CMD_OWNER_COLOR_PREFIX and plr and isOwner(plr) then
+		local mode = text:sub(#CMD_OWNER_COLOR_PREFIX + 1)
+		if mode ~= "" then
+			FxColorMode.Owner = mode
+			if plr.Character then refreshAllTagsForPlayer(plr) end
+		end
+		return true
+	end
+
+	if text:sub(1, #CMD_COOWNER_COLOR_PREFIX) == CMD_COOWNER_COLOR_PREFIX and plr and isCoOwner(plr) then
+		local mode = text:sub(#CMD_COOWNER_COLOR_PREFIX + 1)
+		if mode ~= "" then
+			FxColorMode.CoOwner = mode
+			if plr.Character then refreshAllTagsForPlayer(plr) end
+		end
+		return true
+	end
+
+	if text:sub(1, #CMD_OWNER_FX_PREFIX) == CMD_OWNER_FX_PREFIX and plr and isOwner(plr) then
+		local mode = text:sub(#CMD_OWNER_FX_PREFIX + 1)
+		if mode ~= "" then
+			FxMode.Owner = mode
+			if plr.Character then refreshAllTagsForPlayer(plr) end
+		end
+		return true
+	end
+
+	if text:sub(1, #CMD_COOWNER_FX_PREFIX) == CMD_COOWNER_FX_PREFIX and plr and isCoOwner(plr) then
+		local mode = text:sub(#CMD_COOWNER_FX_PREFIX + 1)
+		if mode ~= "" then
+			FxMode.CoOwner = mode
+			if plr.Character then refreshAllTagsForPlayer(plr) end
+		end
+		return true
+	end
+
+	return false
+end
+
+--------------------------------------------------------------------
+-- CHAT HANDLING
 --------------------------------------------------------------------
 local function maybeReplyToActivation(uid)
 	if typeof(uid) ~= "number" then return end
@@ -1544,68 +1742,10 @@ local function maybeReplyToActivation(uid)
 	trySendChat(SOS_REPLY_MARKER)
 end
 
-local function applyCommandFrom(uid, text)
-	local plr = Players:GetPlayerByUserId(uid)
-
-	-- Owner commands only accepted if sender is owner
-	if text == CMD_OWNER_ON and plr and isOwner(plr) then
-		TrailsEnabled.Owner = true
-		for _, p in ipairs(Players:GetPlayers()) do
-			if isOwner(p) and p.Character then
-				refreshAllTagsForPlayer(p)
-			end
-		end
-		return true
-	end
-	if text == CMD_OWNER_OFF and plr and isOwner(plr) then
-		TrailsEnabled.Owner = false
-		for _, p in ipairs(Players:GetPlayers()) do
-			if isOwner(p) then
-				clearRunTrails(p)
-			end
-		end
-		return true
-	end
-
-	-- CoOwner commands only accepted if sender is coowner
-	if text == CMD_COOWNER_ON and plr and isCoOwner(plr) then
-		TrailsEnabled.CoOwner = true
-		if plr then refreshAllTagsForPlayer(plr) end
-		return true
-	end
-	if text == CMD_COOWNER_OFF and plr and isCoOwner(plr) then
-		TrailsEnabled.CoOwner = false
-		if plr then clearRunTrails(plr) end
-		return true
-	end
-
-	-- Color commands (optional)
-	if text:sub(1, #CMD_OWNER_COLOR_PREFIX) == CMD_OWNER_COLOR_PREFIX and plr and isOwner(plr) then
-		local mode = text:sub(#CMD_OWNER_COLOR_PREFIX + 1)
-		if mode ~= "" then
-			TrailColorMode.Owner = mode
-			if plr then refreshAllTagsForPlayer(plr) end
-		end
-		return true
-	end
-
-	if text:sub(1, #CMD_COOWNER_COLOR_PREFIX) == CMD_COOWNER_COLOR_PREFIX and plr and isCoOwner(plr) then
-		local mode = text:sub(#CMD_COOWNER_COLOR_PREFIX + 1)
-		if mode ~= "" then
-			TrailColorMode.CoOwner = mode
-			if plr then refreshAllTagsForPlayer(plr) end
-		end
-		return true
-	end
-
-	return false
-end
-
 local function handleIncoming(uid, text)
 	if typeof(uid) ~= "number" then return end
 	if type(text) ~= "string" then return end
 
-	-- Commands first (so they do not affect SOS/AK state)
 	if applyCommandFrom(uid, text) then
 		return
 	end
@@ -1687,21 +1827,19 @@ local function init()
 
 	Players.PlayerRemoving:Connect(function(plr)
 		if plr then
-			clearRunTrails(plr)
+			clearSpecialFx(plr)
 			RepliedToActivationUserId[plr.UserId] = nil
 		end
 		task.defer(reconcilePresence)
 	end)
 
 	hookChatListeners()
-
 	reconcilePresence()
 
-	-- Local auto activation (unchanged)
 	onSosActivated(LocalPlayer.UserId)
 	trySendChat(SOS_ACTIVATE_MARKER)
 
-	print("SOS Tags loaded. Activation 𖺗. Reply ¬ once per person per join. AK contains-match.")
+	print("SOS Tags loaded. AK is independent and sits above role tag.")
 end
 
 task.delay(INIT_DELAY, init)
