@@ -23,14 +23,20 @@
 
 -- FX
 -- Owner + Cinna get intense speed trails (only while moving).
---   Owner = rainbow trails. Cinna = light blue faded to red.
+--   Owner default = rainbow trails.
+--   Cinna default = light blue faded to red.
 --   Trail length grows with speed, capped at 20 studs.
 
 -- Owner arrival
 -- When an Owner is present, non-owners see a quick glitch screen:
 --   Text: "He has Arrived"
 --   Sound: rbxassetid://136954512002069
--- Rainbow sky effect REMOVED completely.
+
+-- Co-Owner arrival
+-- When Co-Owner is present, non-owners/non-coowners see a quick glitch screen:
+--   Text: "Hes Behind You"
+--   Sound: rbxassetid://119023903778140
+--   Flash white
 
 --------------------------------------------------------------------
 -- SERVICES
@@ -40,6 +46,7 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:FindService("TextChatService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -48,7 +55,6 @@ local LocalPlayer = Players.LocalPlayer
 --------------------------------------------------------------------
 local SOS_ACTIVATE_MARKER = "𖺗"
 local SOS_REPLY_MARKER = "¬"
-local SOS_JOINER_MARKER = "•"
 
 local AK_MARKER_1 = "؍؍؍"
 local AK_MARKER_2 = "؍"
@@ -63,10 +69,13 @@ local ORB_SIZE = 18
 local ORB_OFFSET_Y = 3.35
 
 --------------------------------------------------------------------
--- OWNER ARRIVAL (NO SKY)
+-- ARRIVAL FX
 --------------------------------------------------------------------
 local OWNER_ARRIVAL_TEXT = "He has Arrived"
 local OWNER_ARRIVAL_SOUND_ID = "rbxassetid://136954512002069"
+
+local COOWNER_ARRIVAL_TEXT = "Hes Behind You"
+local COOWNER_ARRIVAL_SOUND_ID = "rbxassetid://119023903778140"
 
 --------------------------------------------------------------------
 -- ROLES DATA
@@ -108,16 +117,14 @@ local SinProfiles = {
 	[8956134409] = { SinName = "Cars", Color = Color3.fromRGB(0, 255, 0) },
 }
 
--- OG profiles (empty by default)
+-- OG profiles (optional)
 local OgProfiles = {
-		[8956134409] = { OGName = "BR05", Color = Color3.fromRGB(255, 0, 0) }
 	-- [123456789] = { OgName = "OG", Color = Color3.fromRGB(160,220,255) },
 }
 
--- Custom tag profiles (empty by default)
+-- Custom tag profiles (used for Co-Owner)
 local CustomTags = {
-	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(255,255,255) }
-	-- [123456789] = { TagText = "Custom Title", Color = Color3.fromRGB(255,255,255) },
+	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(245, 245, 245) },
 }
 
 --------------------------------------------------------------------
@@ -127,6 +134,16 @@ local TRAIL_FOLDER_NAME = "SOS_RunTrails"
 local TRAIL_MAX_STUDS = 20
 local TRAIL_LEN_PER_SPEED = 0.7
 local TRAIL_MIN_SPEED = 1.5
+
+-- Commands (sent in chat by buttons)
+local CMD_OWNER_ON = "Owner_on"
+local CMD_OWNER_OFF = "Owner_off"
+local CMD_COOWNER_ON = "CoOwner_on"
+local CMD_COOWNER_OFF = "CoOwner_off"
+
+-- Optional color commands (also sent by the slide-out menu)
+local CMD_OWNER_COLOR_PREFIX = "Owner_color:"
+local CMD_COOWNER_COLOR_PREFIX = "CoOwner_color:"
 
 --------------------------------------------------------------------
 -- STATE
@@ -140,6 +157,16 @@ local SeenFirstActivation = false
 -- Reply only once per person per join
 local RepliedToActivationUserId = {}
 
+-- Trails toggle + color modes, synced via chat commands
+local TrailsEnabled = {
+	Owner = true,
+	CoOwner = true,
+}
+local TrailColorMode = {
+	Owner = "Rainbow",
+	CoOwner = "BlueRed",
+}
+
 local gui
 local statsPopup
 local statsPopupLabel
@@ -148,8 +175,13 @@ local broadcastPanel
 local broadcastSOS
 local broadcastAK
 
--- Owner arrival state
+local sfxPanel
+local sfxOnBtn
+local sfxOffBtn
+
+-- Owner/CoOwner presence state
 local ownerPresenceAnnounced = false
+local coOwnerPresenceAnnounced = false
 
 -- Trail connections
 local TrailsConnByUserId = {}
@@ -275,7 +307,11 @@ local function makeButton(parent, txt)
 end
 
 local function isOwner(plr)
-	return (OwnerNames[plr.Name] == true) or (OwnerUserIds[plr.UserId] == true)
+	return plr and ((OwnerNames[plr.Name] == true) or (OwnerUserIds[plr.UserId] == true))
+end
+
+local function isCoOwner(plr)
+	return plr and (plr.UserId == 2630250935)
 end
 
 local function canSeeBroadcastButtons()
@@ -284,7 +320,255 @@ local function canSeeBroadcastButtons()
 	end
 	return LocalPlayer.UserId == 2630250935
 end
+--------------------------------------------------------------------
+-- LEFT SLIDE-OUT MENU (SOS HUD STYLE)
+--------------------------------------------------------------------
+local trailPanel
+local trailArrow
+local trailOpen = false
+local trailTween = nil
 
+local function canSeeTrailMenu()
+	return isOwner(LocalPlayer) or isCoOwner(LocalPlayer)
+end
+
+local function trySendChat(text)
+	-- TextChatService
+	do
+		local ok, sent = pcall(function()
+			if TextChatService and TextChatService.TextChannels then
+				local general = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
+				if general and general.SendAsync then
+					general:SendAsync(text)
+					return true
+				end
+			end
+			return false
+		end)
+		if ok and sent == true then
+			return true
+		end
+	end
+
+	-- Legacy chat
+	do
+		local ok, sent = pcall(function()
+			local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+			if events then
+				local say = events:FindFirstChild("SayMessageRequest")
+				if say and say.FireServer then
+					say:FireServer(text, "All")
+					return true
+				end
+			end
+			return false
+		end)
+		if ok and sent == true then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function ensureTrailMenu()
+	ensureGui()
+
+	if not canSeeTrailMenu() then
+		if trailPanel and trailPanel.Parent then trailPanel:Destroy() end
+		trailPanel, trailArrow = nil, nil
+		trailOpen = false
+		trailTween = nil
+		return
+	end
+
+	if trailPanel and trailPanel.Parent then
+		return
+	end
+
+	local PANEL_W, PANEL_H = 250, 170
+	local ARROW_W = 34
+
+	trailPanel = Instance.new("Frame")
+	trailPanel.Name = "SOS_TrailsPanel"
+	trailPanel.AnchorPoint = Vector2.new(0, 0.5)
+	trailPanel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
+	trailPanel.Position = UDim2.new(0, -(PANEL_W - ARROW_W), 0.5, 0)
+	trailPanel.BorderSizePixel = 0
+	trailPanel.Parent = gui
+	makeCorner(trailPanel, 16)
+	makeGlass(trailPanel)
+	makeStroke(trailPanel, 2, Color3.fromRGB(200, 40, 40), 0.10)
+
+	trailArrow = Instance.new("TextButton")
+	trailArrow.Name = "Arrow"
+	trailArrow.AnchorPoint = Vector2.new(1, 0.5)
+	trailArrow.Size = UDim2.new(0, ARROW_W, 0, 46)
+	trailArrow.Position = UDim2.new(1, 0, 0.5, 0)
+	trailArrow.BorderSizePixel = 0
+	trailArrow.AutoButtonColor = true
+	trailArrow.Text = ">"
+	trailArrow.Font = Enum.Font.GothamBlack
+	trailArrow.TextSize = 18
+	trailArrow.TextColor3 = Color3.fromRGB(245, 245, 245)
+	trailArrow.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+	trailArrow.BackgroundTransparency = 0.18
+	trailArrow.Parent = trailPanel
+	makeCorner(trailArrow, 14)
+	makeStroke(trailArrow, 2, Color3.fromRGB(200, 40, 40), 0.15)
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.BackgroundTransparency = 1
+	title.Position = UDim2.new(0, 12, 0, 10)
+	title.Size = UDim2.new(1, -(ARROW_W + 18), 0, 22)
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 16
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextColor3 = Color3.fromRGB(245, 245, 245)
+	title.Text = "Trails"
+	title.Parent = trailPanel
+
+	local sub = Instance.new("TextLabel")
+	sub.Name = "Sub"
+	sub.BackgroundTransparency = 1
+	sub.Position = UDim2.new(0, 12, 0, 34)
+	sub.Size = UDim2.new(1, -(ARROW_W + 18), 0, 18)
+	sub.Font = Enum.Font.Gotham
+	sub.TextSize = 12
+	sub.TextXAlignment = Enum.TextXAlignment.Left
+	sub.TextColor3 = Color3.fromRGB(200, 200, 200)
+	sub.Text = isOwner(LocalPlayer) and "Owner controls" or "Co-Owner controls"
+	sub.Parent = trailPanel
+
+	local btnRow = Instance.new("Frame")
+	btnRow.BackgroundTransparency = 1
+	btnRow.Position = UDim2.new(0, 10, 0, 62)
+	btnRow.Size = UDim2.new(1, -(ARROW_W + 20), 0, 36)
+	btnRow.Parent = trailPanel
+
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Padding = UDim.new(0, 10)
+	rowLayout.Parent = btnRow
+
+	local onBtn = makeButton(btnRow, "ON")
+	onBtn.Size = UDim2.new(0, 90, 0, 32)
+
+	local offBtn = makeButton(btnRow, "OFF")
+	offBtn.Size = UDim2.new(0, 90, 0, 32)
+
+	local colorsLabel = Instance.new("TextLabel")
+	colorsLabel.BackgroundTransparency = 1
+	colorsLabel.Position = UDim2.new(0, 12, 0, 104)
+	colorsLabel.Size = UDim2.new(1, -(ARROW_W + 18), 0, 16)
+	colorsLabel.Font = Enum.Font.GothamBold
+	colorsLabel.TextSize = 12
+	colorsLabel.TextXAlignment = Enum.TextXAlignment.Left
+	colorsLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
+	colorsLabel.Text = "Colour"
+	colorsLabel.Parent = trailPanel
+
+	local colorRow = Instance.new("Frame")
+	colorRow.BackgroundTransparency = 1
+	colorRow.Position = UDim2.new(0, 10, 0, 124)
+	colorRow.Size = UDim2.new(1, -(ARROW_W + 20), 0, 36)
+	colorRow.Parent = trailPanel
+
+	local colorLayout = Instance.new("UIListLayout")
+	colorLayout.FillDirection = Enum.FillDirection.Horizontal
+	colorLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	colorLayout.Padding = UDim.new(0, 10)
+	colorLayout.Parent = colorRow
+
+	local c1 = makeButton(colorRow, "1")
+	c1.Size = UDim2.new(0, 50, 0, 32)
+	local c2 = makeButton(colorRow, "2")
+	c2.Size = UDim2.new(0, 50, 0, 32)
+	local c3 = makeButton(colorRow, "3")
+	c3.Size = UDim2.new(0, 50, 0, 32)
+
+	local function sendOn()
+		if isOwner(LocalPlayer) then
+			TrailsEnabled.Owner = true
+			trySendChat(CMD_OWNER_ON)
+		elseif isCoOwner(LocalPlayer) then
+			TrailsEnabled.CoOwner = true
+			trySendChat(CMD_COOWNER_ON)
+		end
+	end
+
+	local function sendOff()
+		if isOwner(LocalPlayer) then
+			TrailsEnabled.Owner = false
+			trySendChat(CMD_OWNER_OFF)
+		elseif isCoOwner(LocalPlayer) then
+			TrailsEnabled.CoOwner = false
+			trySendChat(CMD_COOWNER_OFF)
+		end
+	end
+
+	local function sendColor(mode)
+		if isOwner(LocalPlayer) then
+			TrailColorMode.Owner = mode
+			trySendChat(CMD_OWNER_COLOR_PREFIX .. mode)
+		elseif isCoOwner(LocalPlayer) then
+			TrailColorMode.CoOwner = mode
+			trySendChat(CMD_COOWNER_COLOR_PREFIX .. mode)
+		end
+	end
+
+	onBtn.MouseButton1Click:Connect(sendOn)
+	offBtn.MouseButton1Click:Connect(sendOff)
+
+	if isOwner(LocalPlayer) then
+		c1.Text = "RGB"
+		c2.Text = "YLW"
+		c3.Text = "RED"
+		c1.MouseButton1Click:Connect(function() sendColor("Rainbow") end)
+		c2.MouseButton1Click:Connect(function() sendColor("Yellow") end)
+		c3.MouseButton1Click:Connect(function() sendColor("Red") end)
+	else
+		c1.Text = "B/R"
+		c2.Text = "CYN"
+		c3.Text = "GRN"
+		c1.MouseButton1Click:Connect(function() sendColor("BlueRed") end)
+		c2.MouseButton1Click:Connect(function() sendColor("Cyan") end)
+		c3.MouseButton1Click:Connect(function() sendColor("Green") end)
+	end
+
+	local openPos = UDim2.new(0, 10, 0.5, 0)
+	local closedPos = UDim2.new(0, -(PANEL_W - ARROW_W), 0.5, 0)
+
+	local function setTrailMenu(open)
+		trailOpen = open
+		trailArrow.Text = open and "<" or ">"
+
+		if trailTween then
+			pcall(function() trailTween:Cancel() end)
+			trailTween = nil
+		end
+
+		trailTween = TweenService:Create(
+			trailPanel,
+			TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Position = open and openPos or closedPos }
+		)
+		trailTween:Play()
+	end
+
+	trailArrow.MouseButton1Click:Connect(function()
+		setTrailMenu(not trailOpen)
+	end)
+
+	trailOpen = false
+	trailArrow.Text = ">"
+end
+
+--------------------------------------------------------------------
+-- BROADCAST UI (UNCHANGED SOS/AK)
+--------------------------------------------------------------------
 local function ensureBroadcastPanel()
 	ensureGui()
 
@@ -330,6 +614,73 @@ local function ensureBroadcastPanel()
 	broadcastAK.Size = UDim2.new(0, 100, 0, 32)
 end
 
+--------------------------------------------------------------------
+-- SFX COMMAND BUTTONS (OWNER OR CO-OWNER ONLY, EACH SEES OWN)
+--------------------------------------------------------------------
+local function ensureSfxPanel()
+	ensureGui()
+
+	local show = isOwner(LocalPlayer) or isCoOwner(LocalPlayer)
+	if not show then
+		if sfxPanel and sfxPanel.Parent then sfxPanel:Destroy() end
+		sfxPanel, sfxOnBtn, sfxOffBtn = nil, nil, nil
+		return
+	end
+
+	if sfxPanel and sfxPanel.Parent then return end
+
+	sfxPanel = Instance.new("Frame")
+	sfxPanel.Name = "SfxPanel"
+	sfxPanel.AnchorPoint = Vector2.new(0, 1)
+	sfxPanel.Position = UDim2.new(0, 10, 1, -64)
+	sfxPanel.Size = UDim2.new(0, 220, 0, 44)
+	sfxPanel.BorderSizePixel = 0
+	sfxPanel.Parent = gui
+	makeCorner(sfxPanel, 14)
+	makeGlass(sfxPanel)
+	makeStroke(sfxPanel, 2, Color3.fromRGB(200, 40, 40), 0.1)
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 10)
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Parent = sfxPanel
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
+	pad.Parent = sfxPanel
+
+	sfxOnBtn = makeButton(sfxPanel, "SFX ON")
+	sfxOnBtn.Size = UDim2.new(0, 100, 0, 30)
+
+	sfxOffBtn = makeButton(sfxPanel, "SFX OFF")
+	sfxOffBtn.Size = UDim2.new(0, 100, 0, 30)
+
+	sfxOnBtn.MouseButton1Click:Connect(function()
+		if isOwner(LocalPlayer) then
+			TrailsEnabled.Owner = true
+			trySendChat(CMD_OWNER_ON)
+		elseif isCoOwner(LocalPlayer) then
+			TrailsEnabled.CoOwner = true
+			trySendChat(CMD_COOWNER_ON)
+		end
+	end)
+
+	sfxOffBtn.MouseButton1Click:Connect(function()
+		if isOwner(LocalPlayer) then
+			TrailsEnabled.Owner = false
+			trySendChat(CMD_OWNER_OFF)
+		elseif isCoOwner(LocalPlayer) then
+			TrailsEnabled.CoOwner = false
+			trySendChat(CMD_COOWNER_OFF)
+		end
+	end)
+end
+--------------------------------------------------------------------
+-- STATS POPUP
+--------------------------------------------------------------------
 local function ensureStatsPopup()
 	ensureGui()
 	if statsPopup and statsPopup.Parent then return end
@@ -376,44 +727,6 @@ local function destroyTagGui(char, name)
 	end
 end
 
-local function trySendChat(text)
-	-- TextChatService
-	do
-		local ok, sent = pcall(function()
-			if TextChatService and TextChatService.TextChannels then
-				local general = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
-				if general and general.SendAsync then
-					general:SendAsync(text)
-					return true
-				end
-			end
-			return false
-		end)
-		if ok and sent == true then
-			return true
-		end
-	end
-
-	-- Legacy chat
-	do
-		local ok, sent = pcall(function()
-			local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-			if events then
-				local say = events:FindFirstChild("SayMessageRequest")
-				if say and say.FireServer then
-					say:FireServer(text, "All")
-					return true
-				end
-			end
-			return false
-		end)
-		if ok and sent == true then
-			return true
-		end
-	end
-
-	return false
-end
 --------------------------------------------------------------------
 -- ROLE RESOLUTION
 --------------------------------------------------------------------
@@ -464,7 +777,7 @@ local function getRoleColor(plr, role)
 end
 
 local function getTopLine(plr, role)
-	if role == "Owner" then return "SOS Owner" end
+	if role == "Owner" then return "Owner" end
 	if role == "Tester" then return "SOS Tester" end
 
 	if role == "Sin" then
@@ -551,7 +864,9 @@ local function makeTagButtonCommon(btn, plr)
 	end
 
 	btn.MouseButton1Click:Connect(act)
-	btn.Activated:Connect(act)
+	pcall(function()
+		btn.Activated:Connect(act)
+	end)
 end
 
 --------------------------------------------------------------------
@@ -652,7 +967,6 @@ local function createOwnerGlitchText(label)
 		end
 	end)
 end
-
 --------------------------------------------------------------------
 -- SPEED TRAILS (INTENSE)
 --------------------------------------------------------------------
@@ -718,18 +1032,59 @@ local function applyOwnerRainbow(trail, hue)
 	trail.Color = ColorSequence.new(c0, c1)
 end
 
-local function applyCinnaBlueToRed(trail)
-	trail.Color = ColorSequence.new(
-		Color3.fromRGB(200, 235, 255),
-		Color3.fromRGB(255, 120, 120)
-	)
+local function setTrailStatic(trail, c0, c1)
+	trail.Color = ColorSequence.new(c0, c1 or c0)
+end
+
+local function resolveOwnerMode()
+	return TrailColorMode.Owner or "Rainbow"
+end
+
+local function resolveCoOwnerMode()
+	return TrailColorMode.CoOwner or "BlueRed"
+end
+
+local function applyOwnerMode(trail, hue)
+	local mode = resolveOwnerMode()
+	if mode == "Rainbow" then
+		applyOwnerRainbow(trail, hue)
+	elseif mode == "Yellow" then
+		setTrailStatic(trail, Color3.fromRGB(255, 255, 80), Color3.fromRGB(255, 220, 60))
+	elseif mode == "Red" then
+		setTrailStatic(trail, Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 120, 120))
+	else
+		applyOwnerRainbow(trail, hue)
+	end
+end
+
+local function applyCoOwnerMode(trail)
+	local mode = resolveCoOwnerMode()
+	if mode == "BlueRed" then
+		setTrailStatic(trail, Color3.fromRGB(200, 235, 255), Color3.fromRGB(255, 120, 120))
+	elseif mode == "Cyan" then
+		setTrailStatic(trail, Color3.fromRGB(120, 255, 255), Color3.fromRGB(80, 180, 255))
+	elseif mode == "Green" then
+		setTrailStatic(trail, Color3.fromRGB(120, 255, 120), Color3.fromRGB(40, 200, 90))
+	else
+		setTrailStatic(trail, Color3.fromRGB(200, 235, 255), Color3.fromRGB(255, 120, 120))
+	end
 end
 
 local function ensureRunTrails(plr, role)
 	if not plr or not plr.Character then return end
 
-	local isSpecial = (role == "Owner") or (plr.UserId == 2630250935)
-	if not isSpecial then
+	local isOwnerRole = (role == "Owner")
+	local isCinnaRole = (plr.UserId == 2630250935)
+
+	local enabled = true
+	if isOwnerRole then
+		enabled = TrailsEnabled.Owner ~= false
+	elseif isCinnaRole then
+		enabled = TrailsEnabled.CoOwner ~= false
+	end
+
+	local isSpecial = isOwnerRole or isCinnaRole
+	if (not isSpecial) or (not enabled) then
 		clearRunTrails(plr)
 		return
 	end
@@ -764,6 +1119,16 @@ local function ensureRunTrails(plr, role)
 			return
 		end
 
+		-- live enable check (in case commands toggled)
+		if isOwnerRole and TrailsEnabled.Owner == false then
+			clearRunTrails(plr)
+			return
+		end
+		if isCinnaRole and TrailsEnabled.CoOwner == false then
+			clearRunTrails(plr)
+			return
+		end
+
 		local speed = hrp.Velocity.Magnitude
 		local moving = speed > TRAIL_MIN_SPEED
 
@@ -778,24 +1143,25 @@ local function ensureRunTrails(plr, role)
 
 		for _, tr in ipairs(trails) do
 			tr.Lifetime = lifetime
-			if role == "Owner" then
+			if isOwnerRole then
 				hue = (hue + dt * 0.95) % 1
-				applyOwnerRainbow(tr, hue)
+				applyOwnerMode(tr, hue)
 			else
-				applyCinnaBlueToRed(tr)
+				applyCoOwnerMode(tr)
 			end
 		end
 	end)
 
 	TrailsConnByUserId[plr.UserId] = conn
 end
+
 --------------------------------------------------------------------
--- OWNER ARRIVAL GLITCH SCREEN
+-- ARRIVAL GLITCH SCREENS
 --------------------------------------------------------------------
-local function playOwnerArrivalSound(parentGui)
+local function playArrivalSound(parentGui, soundId)
 	local s = Instance.new("Sound")
-	s.Name = "OwnerArrivalSfx"
-	s.SoundId = OWNER_ARRIVAL_SOUND_ID
+	s.Name = "ArrivalSfx"
+	s.SoundId = soundId
 	s.Volume = 0.9
 	s.Looped = false
 	s.Parent = parentGui
@@ -807,17 +1173,13 @@ end
 
 local function showOwnerArrivalGlitch()
 	ensureGui()
-
-	-- Owners don't see the glitch screen (they just get a notify)
 	if isOwner(LocalPlayer) then
-		notify("SOS", "Owner arrival effect triggered for others.", 3)
 		return
 	end
 
 	local overlay = Instance.new("Frame")
 	overlay.Name = "OwnerArrivalOverlay"
 	overlay.Size = UDim2.new(1, 0, 1, 0)
-	overlay.Position = UDim2.new(0, 0, 0, 0)
 	overlay.BorderSizePixel = 0
 	overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	overlay.BackgroundTransparency = 0.15
@@ -828,7 +1190,6 @@ local function showOwnerArrivalGlitch()
 	noise.Name = "Noise"
 	noise.BackgroundTransparency = 1
 	noise.Size = UDim2.new(1, 0, 1, 0)
-	noise.Position = UDim2.new(0, 0, 0, 0)
 	noise.Image = "rbxassetid://5028857084"
 	noise.ImageTransparency = 0.5
 	noise.ZIndex = 5001
@@ -849,24 +1210,74 @@ local function showOwnerArrivalGlitch()
 	msg.ZIndex = 5002
 	msg.Parent = overlay
 
-	playOwnerArrivalSound(gui)
+	playArrivalSound(gui, OWNER_ARRIVAL_SOUND_ID)
 
 	task.spawn(function()
 		local rng = Random.new()
 		local t0 = os.clock()
 		while overlay and overlay.Parent and (os.clock() - t0) < 1.2 do
-			local jx = rng:NextInteger(-10, 10)
-			local jy = rng:NextInteger(-8, 8)
-			msg.Position = UDim2.new(0.5, jx, 0.5, jy)
+			msg.Position = UDim2.new(0.5, rng:NextInteger(-10, 10), 0.5, rng:NextInteger(-8, 8))
 			noise.Rotation = rng:NextInteger(0, 360)
 			noise.ImageTransparency = rng:NextNumber(0.30, 0.75)
 			overlay.BackgroundTransparency = rng:NextNumber(0.05, 0.25)
 			task.wait(rng:NextNumber(0.03, 0.06))
 		end
+		if overlay and overlay.Parent then overlay:Destroy() end
+	end)
+end
 
-		if overlay and overlay.Parent then
-			overlay:Destroy()
+local function showCoOwnerArrivalGlitch()
+	ensureGui()
+	if isCoOwner(LocalPlayer) or isOwner(LocalPlayer) then
+		return
+	end
+
+	local overlay = Instance.new("Frame")
+	overlay.Name = "CoOwnerArrivalOverlay"
+	overlay.Size = UDim2.new(1, 0, 1, 0)
+	overlay.BorderSizePixel = 0
+	overlay.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	overlay.BackgroundTransparency = 0.35
+	overlay.ZIndex = 5000
+	overlay.Parent = gui
+
+	local noise = Instance.new("ImageLabel")
+	noise.Name = "Noise"
+	noise.BackgroundTransparency = 1
+	noise.Size = UDim2.new(1, 0, 1, 0)
+	noise.Image = "rbxassetid://5028857084"
+	noise.ImageTransparency = 0.55
+	noise.ZIndex = 5001
+	noise.Parent = overlay
+
+	local msg = Instance.new("TextLabel")
+	msg.Name = "Msg"
+	msg.BackgroundTransparency = 1
+	msg.AnchorPoint = Vector2.new(0.5, 0.5)
+	msg.Position = UDim2.new(0.5, 0, 0.5, 0)
+	msg.Size = UDim2.new(0, 740, 0, 120)
+	msg.Font = Enum.Font.GothamBlack
+	msg.TextSize = 44
+	msg.Text = COOWNER_ARRIVAL_TEXT
+	msg.TextColor3 = Color3.fromRGB(0, 0, 0)
+	msg.TextStrokeTransparency = 0.65
+	msg.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
+	msg.ZIndex = 5002
+	msg.Parent = overlay
+
+	playArrivalSound(gui, COOWNER_ARRIVAL_SOUND_ID)
+
+	task.spawn(function()
+		local rng = Random.new()
+		local t0 = os.clock()
+		while overlay and overlay.Parent and (os.clock() - t0) < 1.0 do
+			msg.Position = UDim2.new(0.5, rng:NextInteger(-12, 12), 0.5, rng:NextInteger(-10, 10))
+			noise.Rotation = rng:NextInteger(0, 360)
+			noise.ImageTransparency = rng:NextNumber(0.35, 0.78)
+			overlay.BackgroundTransparency = rng:NextNumber(0.10, 0.55)
+			task.wait(rng:NextNumber(0.03, 0.06))
 		end
+		if overlay and overlay.Parent then overlay:Destroy() end
 	end)
 end
 
@@ -879,13 +1290,30 @@ local function anyOwnerPresent()
 	return false
 end
 
-local function reconcileOwnerPresence()
-	local present = anyOwnerPresent()
-	if present and not ownerPresenceAnnounced then
+local function anyCoOwnerPresent()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if isCoOwner(p) then
+			return true
+		end
+	end
+	return false
+end
+
+local function reconcilePresence()
+	local ownerPresent = anyOwnerPresent()
+	if ownerPresent and not ownerPresenceAnnounced then
 		ownerPresenceAnnounced = true
 		showOwnerArrivalGlitch()
-	elseif not present then
+	elseif not ownerPresent then
 		ownerPresenceAnnounced = false
+	end
+
+	local coPresent = anyCoOwnerPresent()
+	if coPresent and not coOwnerPresenceAnnounced then
+		coOwnerPresenceAnnounced = true
+		showCoOwnerArrivalGlitch()
+	elseif not coPresent then
+		coOwnerPresenceAnnounced = false
 	end
 end
 
@@ -975,6 +1403,7 @@ local function createSosRoleTag(plr)
 		top.TextColor3 = color
 	end
 
+	-- Username line (fixed to always show)
 	local bottom = Instance.new("TextLabel")
 	bottom.BackgroundTransparency = 1
 	bottom.Size = UDim2.new(1, -10, 0, 16)
@@ -985,7 +1414,7 @@ local function createSosRoleTag(plr)
 	bottom.TextXAlignment = Enum.TextXAlignment.Center
 	bottom.TextYAlignment = Enum.TextYAlignment.Center
 	bottom.Text = plr.Name
-	bottom.ZIndex = 3
+	bottom.ZIndex = 4
 	bottom.Parent = btn
 
 	makeTagButtonCommon(btn, plr)
@@ -996,6 +1425,7 @@ local function createAkOrbTag(plr)
 	local char = plr.Character
 	if not char then return end
 
+	-- Owners never show AK orb
 	if isOwner(plr) then
 		destroyTagGui(char, "SOS_AKTag")
 		return
@@ -1095,7 +1525,7 @@ local function textHasAk(text)
 end
 
 --------------------------------------------------------------------
--- CHAT LISTENERS (reply once per person per join)
+-- CHAT HANDLING (ACTIVATION + COMMANDS)
 --------------------------------------------------------------------
 local function maybeReplyToActivation(uid)
 	if typeof(uid) ~= "number" then return end
@@ -1114,6 +1544,89 @@ local function maybeReplyToActivation(uid)
 	trySendChat(SOS_REPLY_MARKER)
 end
 
+local function applyCommandFrom(uid, text)
+	local plr = Players:GetPlayerByUserId(uid)
+
+	-- Owner commands only accepted if sender is owner
+	if text == CMD_OWNER_ON and plr and isOwner(plr) then
+		TrailsEnabled.Owner = true
+		for _, p in ipairs(Players:GetPlayers()) do
+			if isOwner(p) and p.Character then
+				refreshAllTagsForPlayer(p)
+			end
+		end
+		return true
+	end
+	if text == CMD_OWNER_OFF and plr and isOwner(plr) then
+		TrailsEnabled.Owner = false
+		for _, p in ipairs(Players:GetPlayers()) do
+			if isOwner(p) then
+				clearRunTrails(p)
+			end
+		end
+		return true
+	end
+
+	-- CoOwner commands only accepted if sender is coowner
+	if text == CMD_COOWNER_ON and plr and isCoOwner(plr) then
+		TrailsEnabled.CoOwner = true
+		if plr then refreshAllTagsForPlayer(plr) end
+		return true
+	end
+	if text == CMD_COOWNER_OFF and plr and isCoOwner(plr) then
+		TrailsEnabled.CoOwner = false
+		if plr then clearRunTrails(plr) end
+		return true
+	end
+
+	-- Color commands (optional)
+	if text:sub(1, #CMD_OWNER_COLOR_PREFIX) == CMD_OWNER_COLOR_PREFIX and plr and isOwner(plr) then
+		local mode = text:sub(#CMD_OWNER_COLOR_PREFIX + 1)
+		if mode ~= "" then
+			TrailColorMode.Owner = mode
+			if plr then refreshAllTagsForPlayer(plr) end
+		end
+		return true
+	end
+
+	if text:sub(1, #CMD_COOWNER_COLOR_PREFIX) == CMD_COOWNER_COLOR_PREFIX and plr and isCoOwner(plr) then
+		local mode = text:sub(#CMD_COOWNER_COLOR_PREFIX + 1)
+		if mode ~= "" then
+			TrailColorMode.CoOwner = mode
+			if plr then refreshAllTagsForPlayer(plr) end
+		end
+		return true
+	end
+
+	return false
+end
+
+local function handleIncoming(uid, text)
+	if typeof(uid) ~= "number" then return end
+	if type(text) ~= "string" then return end
+
+	-- Commands first (so they do not affect SOS/AK state)
+	if applyCommandFrom(uid, text) then
+		return
+	end
+
+	if text == SOS_ACTIVATE_MARKER then
+		onSosActivated(uid)
+		maybeReplyToActivation(uid)
+		return
+	end
+
+	if text == SOS_REPLY_MARKER then
+		onSosActivated(uid)
+		return
+	end
+
+	if textHasAk(text) then
+		onAkSeen(uid)
+		return
+	end
+end
+
 local function hookChatListeners()
 	if TextChatService and TextChatService.MessageReceived then
 		TextChatService.MessageReceived:Connect(function(msg)
@@ -1121,37 +1634,14 @@ local function hookChatListeners()
 			local text = msg.Text or ""
 			local src = msg.TextSource
 			if not src or not src.UserId then return end
-			local uid = src.UserId
-
-			if text == SOS_ACTIVATE_MARKER then
-				onSosActivated(uid)
-				maybeReplyToActivation(uid)
-				return
-			end
-
-			if text == SOS_REPLY_MARKER then
-				onSosActivated(uid)
-				return
-			end
-
-			if textHasAk(text) then
-				onAkSeen(uid)
-				return
-			end
+			handleIncoming(src.UserId, text)
 		end)
 	end
 
 	local function hookChatted(plr)
 		pcall(function()
 			plr.Chatted:Connect(function(message)
-				if message == SOS_ACTIVATE_MARKER then
-					onSosActivated(plr.UserId)
-					maybeReplyToActivation(plr.UserId)
-				elseif message == SOS_REPLY_MARKER then
-					onSosActivated(plr.UserId)
-				elseif textHasAk(message) then
-					onAkSeen(plr.UserId)
-				end
+				handleIncoming(plr.UserId, message)
 			end)
 		end)
 	end
@@ -1168,6 +1658,8 @@ end
 local function init()
 	ensureStatsPopup()
 	ensureBroadcastPanel()
+	ensureSfxPanel()
+	ensureTrailMenu()
 
 	if broadcastSOS then
 		broadcastSOS.MouseButton1Click:Connect(function()
@@ -1190,7 +1682,7 @@ local function init()
 	Players.PlayerAdded:Connect(function(plr)
 		hookPlayer(plr)
 		RepliedToActivationUserId[plr.UserId] = nil
-		task.defer(reconcileOwnerPresence)
+		task.defer(reconcilePresence)
 	end)
 
 	Players.PlayerRemoving:Connect(function(plr)
@@ -1198,17 +1690,18 @@ local function init()
 			clearRunTrails(plr)
 			RepliedToActivationUserId[plr.UserId] = nil
 		end
-		task.defer(reconcileOwnerPresence)
+		task.defer(reconcilePresence)
 	end)
 
 	hookChatListeners()
 
-	reconcileOwnerPresence()
+	reconcilePresence()
 
+	-- Local auto activation (unchanged)
 	onSosActivated(LocalPlayer.UserId)
 	trySendChat(SOS_ACTIVATE_MARKER)
 
-	print("SOS Tags loaded. Activation 𖺗. Reply ¬ once per person per join. AK contains-match. No rainbow sky.")
+	print("SOS Tags loaded. Activation 𖺗. Reply ¬ once per person per join. AK contains-match.")
 end
 
 task.delay(INIT_DELAY, init)
