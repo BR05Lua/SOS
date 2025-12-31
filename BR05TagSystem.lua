@@ -155,7 +155,7 @@ local TagEffectProfiles = {
 	-- If you want ALL owners to use glitch, use RoleEffectPresets below.
 	-- If you want only specific owners, put their UserIds here.
 	-- [433636433] = { Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline" }, SpinGradient = true },
-	[754232813] = { Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline" }, SpinGradient = true }
+	[754232813] = { Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "Pulse" Color = Color3.fromRGB(255, 0, 0) }, SpinGradient = true }
 }
 
 local RoleEffectPresets = {
