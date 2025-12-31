@@ -105,13 +105,13 @@ local OgProfiles = {
 }
 
 local CustomTags = {
-	[8299334811] = { TagText = "OG Fake Cinny", Color = Color3.fromRGB(6, 255, 169) },
-	[7452991350] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
-	[9072904295] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
-	[7444930172] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
-	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(172, 233, 255) },
-	[4689208231] = { TagText = "OG Shiroyasha", Color = Color3.fromRGB(255, 255, 255) },
-	[754232813] = { TagText = "OG Shiroyasha", Color = Gradient1 = Color3.fromRGB(255, 0, 0), Gradient2 = Color3.fromRGB(0, 255, 0), Gradient3 = Color3.fromRGB(0, 0, 255) },
+	[8299334811] = { TagText = "OG Fake Cinny", },
+	[7452991350] = { TagText = "OG XTCY", },
+	[9072904295] = { TagText = "OG XTCY", },
+	[7444930172] = { TagText = "OG XTCY", },
+	[2630250935] = { TagText = "Co-Owner", },
+	[4689208231] = { TagText = "OG Shiroyasha", },
+	[754232813] = { TagText = "OG Shiroyasha", },
 }
 
 --------------------------------------------------------------------
@@ -156,7 +156,15 @@ local TagEffectProfiles = {
 	-- If you want ALL owners to use glitch, use RoleEffectPresets below.
 	-- If you want only specific owners, put their UserIds here.
 	-- [433636433] = { Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline" }, SpinGradient = true },
-	[754232813] = { Effects = { "Pulse" }, ScrollGradient = true },
+	[754232813] = {
+    Gradient1 = Color3.fromRGB(255, 0, 0),
+    Gradient2 = Color3.fromRGB(0, 255, 0), -- optional
+    Gradient3 = Color3.fromRGB(0, 0, 255), -- optional
+
+    SpinGradient = true or false,
+    ScrollGradient = true or false,
+
+    Effects = { "Pulse" }
 }
 
 local RoleEffectPresets = {
