@@ -109,7 +109,7 @@ local CustomTags = {
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(255, 255, 255) },
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(172, 233, 255) },
     [754232813] = { TagText = "OG Ghoul", Color = Color3.fromRGB(98, 0, 216) },
-	[4689208231] = { TagText = "Shiroyasha", Color = Color3.fromRGB(255, 255, 255) },
+	[4689208231] = { TagText = "OG Shiroyasha", Color = Color3.fromRGB(255, 255, 255) },
 }
 
 --------------------------------------------------------------------
