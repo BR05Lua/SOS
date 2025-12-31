@@ -1,5 +1,6 @@
 -- SOS TAGS Standalone LocalScript
 -- Put in StarterPlayerScripts
+-- Added: per UserId tag effects, 2nd and 3rd gradient colours, spinning RGB gradient options
 
 -- Markers
 -- Activation marker: 𖺗
@@ -18,6 +19,8 @@
 --    - If someone says ؍ (or ؍؍؍ or contains ؍), they get the AK orb.
 --    - No SOS activation required.
 --    - AK orb shows ABOVE the SOS role tag if both exist.
+
+-- British humour for the file: if this starts lagging, just blame "optimisation" and walk away confidently.
 
 --------------------------------------------------------------------
 -- SERVICES
@@ -106,10 +109,104 @@ local CustomTags = {
 	[7452991350] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[9072904295] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[7444930172] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
-	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(255, 255, 255) },
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(172, 233, 255) },
-    [754232813] = { TagText = "OG Ghoul", Color = Color3.fromRGB(98, 0, 216) },
+	[754232813]  = { TagText = "OG Ghoul", Color = Color3.fromRGB(98, 0, 216) },
 	[4689208231] = { TagText = "OG Shiroyasha", Color = Color3.fromRGB(255, 255, 255) },
+}
+
+--------------------------------------------------------------------
+-- TAG EFFECTS SYSTEM (NEW)
+-- You can assign effects by UserId here.
+--
+-- Gradient:
+--  - Gradient1 is required
+--  - Gradient2 optional
+--  - Gradient3 optional
+--  - If SpinGradient is true, it rotates like RGB bedroom lights
+--  - If ScrollGradient is true, it slides the gradient along the tag
+--
+-- Effects list supports:
+--  "OwnerGlitchBackdrop"  (the old owner glitch image, now optional)
+--  "OwnerGlitchText"      (the old owner glitch scrambling text, now optional)
+--  "RgbOutline"           (rainbow outline stroke)
+--  "Shimmer"              (gradient shimmer)
+--  "Pulse"                (tag gently pulses)
+--  "Shake"                (tiny jitter)
+--  "Flicker"              (text flicker)
+--  "RainbowText"          (top line cycles HSV)
+--  "BounceText"           (top line bounces a bit)
+--  "Scanline"             (subtle moving scanline overlay)
+--  "Sparkles"             (occasional sparkles on the tag)
+--
+-- Warning: stacking everything on 40 players is how you summon lag demons.
+--------------------------------------------------------------------
+local TagEffectProfiles = {
+	-- Owner defaults are applied automatically too, but you can override here per UserId
+	-- Example:
+	-- [123456] = {
+	-- 	Gradient1 = Color3.fromRGB(255, 0, 0),
+	-- 	Gradient2 = Color3.fromRGB(0, 255, 0),
+	-- 	Gradient3 = Color3.fromRGB(0, 0, 255),
+	-- 	SpinGradient = true,
+	-- 	ScrollGradient = true,
+	-- 	Effects = { "RgbOutline", "Shimmer", "Pulse", "Scanline" },
+	-- },
+
+	-- Your Owner glitch is now a separate option, but still lives inside the tag visuals
+	-- If you want ALL owners to use glitch, use RoleEffectPresets below.
+	-- If you want only specific owners, put their UserIds here.
+	-- [433636433] = { Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline" }, SpinGradient = true },
+}
+
+local RoleEffectPresets = {
+	Owner = {
+		Gradient1 = Color3.fromRGB(15, 15, 18),
+		Gradient2 = Color3.fromRGB(0, 0, 0),
+		Gradient3 = Color3.fromRGB(30, 30, 36),
+		SpinGradient = false,
+		ScrollGradient = true,
+		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Shimmer", "Scanline" },
+	},
+	Sin = {
+		Gradient1 = Color3.fromRGB(18, 18, 22),
+		Gradient2 = Color3.fromRGB(10, 10, 12),
+		Gradient3 = nil,
+		SpinGradient = false,
+		ScrollGradient = true,
+		Effects = { "Shimmer", "BounceText" },
+	},
+	Normal = {
+		Gradient1 = Color3.fromRGB(24, 24, 30),
+		Gradient2 = Color3.fromRGB(10, 10, 12),
+		Gradient3 = nil,
+		SpinGradient = false,
+		ScrollGradient = false,
+		Effects = { },
+	},
+	Tester = {
+		Gradient1 = Color3.fromRGB(18, 24, 18),
+		Gradient2 = Color3.fromRGB(10, 12, 10),
+		Gradient3 = nil,
+		SpinGradient = false,
+		ScrollGradient = true,
+		Effects = { "Shimmer" },
+	},
+	OG = {
+		Gradient1 = Color3.fromRGB(16, 18, 22),
+		Gradient2 = Color3.fromRGB(10, 10, 12),
+		Gradient3 = nil,
+		SpinGradient = false,
+		ScrollGradient = true,
+		Effects = { "Shimmer" },
+	},
+	Custom = {
+		Gradient1 = Color3.fromRGB(16, 16, 20),
+		Gradient2 = Color3.fromRGB(10, 10, 12),
+		Gradient3 = nil,
+		SpinGradient = false,
+		ScrollGradient = true,
+		Effects = { "Shimmer" },
+	},
 }
 
 --------------------------------------------------------------------
@@ -176,6 +273,9 @@ local ownerPresenceAnnounced = false
 local coOwnerPresenceAnnounced = false
 
 local FxConnByUserId = {}
+
+-- NEW: Tag-only effect connections
+local TagFxConnByUserId = {}
 
 --------------------------------------------------------------------
 -- UI HELPERS
@@ -567,10 +667,6 @@ local function ensureTrailMenu()
 	fxLight.MouseButton1Click:Connect(function() sendFxMode("Lighting") end)
 	fxGlitch.MouseButton1Click:Connect(function() sendFxMode("Glitch") end)
 
-	-- REPLACED COLOUR SET (no old ones kept)
-	-- You can also broadcast custom colours manually:
-	-- Owner_color:#RRGGBB or Owner_color:rgb(255,0,0)
-	-- CoOwner_color:#RRGGBB or CoOwner_color:rgb(255,0,0)
 	local palette = {
 		{ "RGB", Color3.fromRGB(30, 30, 30), "Rainbow" },
 
@@ -752,6 +848,7 @@ local function ensureSfxPanel()
 		end
 	end)
 end
+
 --------------------------------------------------------------------
 -- STATS POPUP + TAG UTIL
 --------------------------------------------------------------------
@@ -793,11 +890,22 @@ local function ensureStatsPopup()
 	end)
 end
 
-local function destroyTagGui(char, name)
+local function disconnectTagFxConn(userId)
+	local c = TagFxConnByUserId[userId]
+	if c then
+		pcall(function() c:Disconnect() end)
+	end
+	TagFxConnByUserId[userId] = nil
+end
+
+local function destroyTagGui(char, name, userIdForFx)
 	if not char then return end
 	local old = char:FindFirstChild(name)
 	if old then
 		old:Destroy()
+	end
+	if userIdForFx then
+		disconnectTagFxConn(userIdForFx)
 	end
 end
 
@@ -944,7 +1052,7 @@ local function makeTagButtonCommon(btn, plr)
 end
 
 --------------------------------------------------------------------
--- VISUAL FX (Owner glitch + RGB outline, Sin wavy)
+-- VISUAL FX HELPERS (existing + NEW tag effects)
 --------------------------------------------------------------------
 local function startRgbOutline(stroke)
 	if not stroke then return end
@@ -1041,6 +1149,235 @@ local function createOwnerGlitchText(label)
 		end
 	end)
 end
+
+local function hasEffect(effects, name)
+	if type(effects) ~= "table" then return false end
+	for _, v in ipairs(effects) do
+		if v == name then return true end
+	end
+	return false
+end
+
+local function buildGradientSequence(c1, c2, c3)
+	c1 = c1 or Color3.fromRGB(24, 24, 30)
+	c2 = c2 or Color3.fromRGB(10, 10, 12)
+	if c3 then
+		return ColorSequence.new({
+			ColorSequenceKeypoint.new(0.00, c1),
+			ColorSequenceKeypoint.new(0.50, c2),
+			ColorSequenceKeypoint.new(1.00, c3),
+		})
+	end
+	return ColorSequence.new({
+		ColorSequenceKeypoint.new(0.00, c1),
+		ColorSequenceKeypoint.new(1.00, c2),
+	})
+end
+
+local function resolveTagProfile(plr, role, roleColor)
+	local preset = RoleEffectPresets[role] or RoleEffectPresets.Normal
+	local custom = TagEffectProfiles[plr.UserId]
+
+	local out = {
+		Gradient1 = preset.Gradient1,
+		Gradient2 = preset.Gradient2,
+		Gradient3 = preset.Gradient3,
+		SpinGradient = preset.SpinGradient,
+		ScrollGradient = preset.ScrollGradient,
+		Effects = preset.Effects or {},
+	}
+
+	-- If no preset, keep standard dark glass
+	if not out.Gradient1 then
+		out.Gradient1 = Color3.fromRGB(24, 24, 30)
+	end
+	if not out.Gradient2 then
+		out.Gradient2 = Color3.fromRGB(10, 10, 12)
+	end
+
+	-- Mild default: let non-owner stroke be role colour, but gradient stays dark
+	-- If you want the gradient to use role colour, set it in presets or per user.
+	out.RoleColor = roleColor
+
+	if custom then
+		if custom.Gradient1 then out.Gradient1 = custom.Gradient1 end
+		if custom.Gradient2 then out.Gradient2 = custom.Gradient2 end
+		if custom.Gradient3 ~= nil then out.Gradient3 = custom.Gradient3 end
+		if custom.SpinGradient ~= nil then out.SpinGradient = custom.SpinGradient end
+		if custom.ScrollGradient ~= nil then out.ScrollGradient = custom.ScrollGradient end
+		if type(custom.Effects) == "table" then out.Effects = custom.Effects end
+	end
+
+	return out
+end
+
+local function attachScanline(btn)
+	local scan = Instance.new("Frame")
+	scan.Name = "Scanline"
+	scan.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	scan.BackgroundTransparency = 0.92
+	scan.BorderSizePixel = 0
+	scan.Size = UDim2.new(1, 0, 0, 6)
+	scan.Position = UDim2.new(0, 0, 0, -10)
+	scan.ZIndex = 2
+	scan.Parent = btn
+
+	local g = Instance.new("UIGradient")
+	g.Rotation = 0
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0.0, 1.0),
+		NumberSequenceKeypoint.new(0.5, 0.0),
+		NumberSequenceKeypoint.new(1.0, 1.0),
+	})
+	g.Parent = scan
+
+	return scan
+end
+
+local function spawnSparkle(btn)
+	-- Tiny sparkle, short life
+	local s = Instance.new("ImageLabel")
+	s.Name = "Sparkle"
+	s.BackgroundTransparency = 1
+	s.Image = "rbxassetid://3926305904"
+	s.ImageRectOffset = Vector2.new(404, 364)
+	s.ImageRectSize = Vector2.new(36, 36)
+	s.ImageTransparency = 0.15
+	s.Size = UDim2.new(0, 14, 0, 14)
+	s.ZIndex = 5
+	s.Parent = btn
+
+	local rng = Random.new()
+	local x = rng:NextNumber(0.10, 0.90)
+	local y = rng:NextNumber(0.15, 0.85)
+	s.Position = UDim2.new(x, -7, y, -7)
+
+	local t1 = TweenService:Create(s, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, 22, 0, 22), ImageTransparency = 0.35 })
+	local t2 = TweenService:Create(s, TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = UDim2.new(0, 6, 0, 6), ImageTransparency = 1 })
+	t1:Play()
+	t1.Completed:Connect(function()
+		if not s or not s.Parent then return end
+		t2:Play()
+	end)
+	t2.Completed:Connect(function()
+		if s and s.Parent then s:Destroy() end
+	end)
+end
+
+local function applyTagEffects(plr, role, btn, baseGrad, stroke, topLabel, bottomLabel, roleColor)
+	if not plr or not btn then return end
+	disconnectTagFxConn(plr.UserId)
+
+	local profile = resolveTagProfile(plr, role, roleColor)
+	local effects = profile.Effects or {}
+
+	-- Build the tag gradient from up to 3 colours
+	baseGrad.Color = buildGradientSequence(profile.Gradient1, profile.Gradient2, profile.Gradient3)
+
+	-- Add optional overlay bits
+	local scanlineFrame = nil
+	if hasEffect(effects, "Scanline") then
+		scanlineFrame = attachScanline(btn)
+	end
+
+	-- Owner glitch options are now separate effects
+	if hasEffect(effects, "OwnerGlitchBackdrop") then
+		addOwnerGlitchBackdrop(btn)
+	end
+	if hasEffect(effects, "OwnerGlitchText") and topLabel then
+		createOwnerGlitchText(topLabel)
+	end
+
+	if hasEffect(effects, "RgbOutline") and stroke then
+		startRgbOutline(stroke)
+	end
+
+	-- Pulse uses UIScale
+	local uiScale = nil
+	if hasEffect(effects, "Pulse") then
+		uiScale = Instance.new("UIScale")
+		uiScale.Scale = 1
+		uiScale.Parent = btn
+	end
+
+	-- If you stack Shake with Pulse and Flicker, it looks like your tag had too many energy drinks.
+	local rng = Random.new()
+	local t = 0
+	local hue = 0
+	local baseTopPos = topLabel and topLabel.Position or nil
+	local baseBtnRot = btn.Rotation
+
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if not btn or not btn.Parent then
+			disconnectTagFxConn(plr.UserId)
+			return
+		end
+
+		t = t + dt
+		hue = (hue + dt * 0.35) % 1
+
+		-- Spinning gradient like RGB room lights
+		if profile.SpinGradient then
+			baseGrad.Rotation = (baseGrad.Rotation + dt * 120) % 360
+		end
+
+		-- Sliding shimmer
+		if profile.ScrollGradient or hasEffect(effects, "Shimmer") then
+			local off = math.sin(t * 1.8) * 0.25
+			baseGrad.Offset = Vector2.new(off, 0)
+		end
+
+		-- Scanline drift
+		if scanlineFrame then
+			local y = (t * 42) % (TAG_H + 20) - 10
+			scanlineFrame.Position = UDim2.new(0, 0, 0, y)
+		end
+
+		-- Text rainbow (top line)
+		if hasEffect(effects, "RainbowText") and topLabel then
+			topLabel.TextColor3 = Color3.fromHSV(hue, 1, 1)
+		end
+
+		-- Bounce text
+		if hasEffect(effects, "BounceText") and topLabel and baseTopPos then
+			local yy = math.sin(t * 6.5) * 1.2
+			topLabel.Position = UDim2.new(baseTopPos.X.Scale, baseTopPos.X.Offset, baseTopPos.Y.Scale, baseTopPos.Y.Offset + yy)
+		end
+
+		-- Flicker
+		if hasEffect(effects, "Flicker") then
+			local flick = (math.sin(t * 22) * 0.5 + 0.5)
+			local tr = 0.05 + (1 - flick) * 0.25
+			if topLabel then topLabel.TextTransparency = tr end
+			if bottomLabel then bottomLabel.TextTransparency = tr * 0.6 end
+		end
+
+		-- Shake
+		if hasEffect(effects, "Shake") then
+			btn.Rotation = baseBtnRot + rng:NextNumber(-0.6, 0.6)
+			btn.Position = UDim2.new(0, rng:NextInteger(-1, 1), 0, rng:NextInteger(-1, 1))
+		else
+			btn.Rotation = baseBtnRot
+			btn.Position = UDim2.new(0, 0, 0, 0)
+		end
+
+		-- Pulse
+		if uiScale then
+			uiScale.Scale = 1 + (math.sin(t * 3.5) * 0.015)
+		end
+
+		-- Sparkles occasionally
+		if hasEffect(effects, "Sparkles") then
+			if rng:NextNumber() < 0.03 then
+				spawnSparkle(btn)
+			end
+		end
+	end)
+
+	TagFxConnByUserId[plr.UserId] = conn
+end
+
 --------------------------------------------------------------------
 -- SPECIAL FX CORE (LINES / LIGHTING / GLITCH)
 --------------------------------------------------------------------
@@ -1151,13 +1488,11 @@ local function colorPairFromMode(mode, hue)
 		return c0, c1, true
 	end
 
-	-- HEX support (#RRGGBB)
 	local hex = parseHexColor(mode)
 	if hex then
 		return hex, hex, false
 	end
 
-	-- rgb(255,0,0) support
 	local rgb = parseRgbFunc(mode)
 	if rgb then
 		return rgb, rgb, false
@@ -1168,7 +1503,6 @@ local function colorPairFromMode(mode, hue)
 		return named
 	end
 
-	-- safe fallback
 	return Color3.fromRGB(200, 235, 255), Color3.fromRGB(255, 120, 120), false
 end
 
@@ -1324,7 +1658,6 @@ end
 local function showOwnerArrivalGlitch()
 	ensureGui()
 
-	-- IMPORTANT: Co-Owner cannot see the Owner intro either
 	if isOwner(LocalPlayer) or isCoOwner(LocalPlayer) then
 		return
 	end
@@ -1481,7 +1814,7 @@ local function createSosRoleTag(plr)
 	ensureSpecialFx(plr, role)
 
 	if not role then
-		destroyTagGui(char, "SOS_RoleTag")
+		destroyTagGui(char, "SOS_RoleTag", plr.UserId)
 		return
 	end
 
@@ -1490,9 +1823,9 @@ local function createSosRoleTag(plr)
 	local adornee = (head and head:IsA("BasePart")) and head or ((hrp and hrp:IsA("BasePart")) and hrp or nil)
 	if not adornee then return end
 
-	destroyTagGui(char, "SOS_RoleTag")
+	destroyTagGui(char, "SOS_RoleTag", plr.UserId)
 
-	local color = getRoleColor(plr, role)
+	local roleColor = getRoleColor(plr, role)
 
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "SOS_RoleTag"
@@ -1522,19 +1855,9 @@ local function createSosRoleTag(plr)
 	})
 	grad.Parent = btn
 
-	local stroke = makeStroke(btn, 2, color, 0.05)
+	local stroke = makeStroke(btn, 2, roleColor, 0.05)
 
-	if role == "Owner" then
-		btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-		btn.BackgroundTransparency = 0.12
-		addOwnerGlitchBackdrop(btn)
-		startRgbOutline(stroke)
-	end
-
-	if role == "Sin" then
-		addSinWavyLook(btn)
-	end
-
+	-- Text
 	local top = Instance.new("TextLabel")
 	top.BackgroundTransparency = 1
 	top.Size = UDim2.new(1, -10, 0, 18)
@@ -1546,14 +1869,7 @@ local function createSosRoleTag(plr)
 	top.Text = getTopLine(plr, role)
 	top.ZIndex = 3
 	top.Parent = btn
-
-	if role == "Owner" then
-		top.TextColor3 = Color3.fromRGB(255, 255, 80)
-		makeStroke(top, 1, Color3.fromRGB(0, 0, 0), 0.35)
-		createOwnerGlitchText(top)
-	else
-		top.TextColor3 = color
-	end
+	top.TextColor3 = roleColor
 
 	local bottom = Instance.new("TextLabel")
 	bottom.BackgroundTransparency = 1
@@ -1567,6 +1883,14 @@ local function createSosRoleTag(plr)
 	bottom.Text = plr.Name
 	bottom.ZIndex = 4
 	bottom.Parent = btn
+
+	-- Keep your existing Sin wavy base look, then layer effects on top if enabled
+	if role == "Sin" then
+		addSinWavyLook(btn)
+	end
+
+	-- NEW: Apply per role and per UserId tag effects, including 2nd and 3rd gradient colours and spinning RGB
+	applyTagEffects(plr, role, btn, grad, stroke, top, bottom, roleColor)
 
 	makeTagButtonCommon(btn, plr)
 end
@@ -1841,6 +2165,7 @@ local function init()
 	Players.PlayerRemoving:Connect(function(plr)
 		if plr then
 			clearSpecialFx(plr)
+			disconnectTagFxConn(plr.UserId)
 			RepliedToActivationUserId[plr.UserId] = nil
 		end
 		task.defer(reconcilePresence)
@@ -1852,10 +2177,11 @@ local function init()
 	onSosActivated(LocalPlayer.UserId)
 	trySendChat(SOS_ACTIVATE_MARKER)
 
-	print("SOS Tags loaded. AK is independent and sits above role tag.")
+	print("SOS Tags loaded. AK is independent and sits above role tag. Also yes, the gradient can now spin like your LEDs.")
 end
 
 task.delay(INIT_DELAY, init)
+
 
 --INF YIELD
 if IY_LOADED and not _G.IY_DEBUG == true then
