@@ -149,7 +149,7 @@ local TagEffectProfiles = {
 	SpinGradient = true,     -- makes it obvious
 	ScrollGradient = true,   -- makes it obvious
 
-	Effects = { "Pulse", "Scanline" },
+	Effects = { "Pulse", "Scanline", "RgbOutline" },
 },
 
 
