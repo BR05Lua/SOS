@@ -98,11 +98,10 @@ local SinProfiles = {
 }
 
 local OgProfiles = {
-	-- empty by default
+	[2630250935],
 }
 
 local CustomTags = {
-	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(245, 245, 245) },
 	[8299334811] = { TagText = "Fake Cinny", Color = Color3.fromRGB(6, 255, 169) },
 	[7452991350] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[9072904295] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
@@ -144,12 +143,12 @@ local FxEnabled = {
 
 local FxColorMode = {
 	Owner = "Rainbow",
-	CoOwner = "Aqua",
+	CoOwner = "Rainbow",
 }
 
 local FxMode = {
 	Owner = "Lines",   -- Lines | Lighting | Glitch
-	CoOwner = "Lines", -- Lines | Lighting | Glitch
+	CoOwner = "Glitch", -- Lines | Lighting | Glitch
 }
 
 local gui
