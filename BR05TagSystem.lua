@@ -102,12 +102,13 @@ local OgProfiles = {
 }
 
 local CustomTags = {
-	[8299334811] = { TagText = "Fake Cinny", Color = Color3.fromRGB(6, 255, 169) },
-	[7452991350] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
-	[9072904295] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
-	[7444930172] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
+	[8299334811] = { TagText = "OG Fake Cinny", Color = Color3.fromRGB(6, 255, 169) },
+	[7452991350] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
+	[9072904295] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
+	[7444930172] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(255, 255, 255) },
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(172, 233, 255) },
+    [754232813] = { TagText = "OG Ghoul", Color = Color3.fromRGB(98, 0, 216) },
 }
 
 --------------------------------------------------------------------
