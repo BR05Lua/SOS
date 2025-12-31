@@ -106,6 +106,8 @@ local CustomTags = {
 	[7452991350] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[9072904295] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[7444930172] = { TagText = "XTCY", Color = Color3.fromRGB(200, 0, 0) },
+	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(255, 255, 255) },
+	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(172, 233, 255) },
 }
 
 --------------------------------------------------------------------
