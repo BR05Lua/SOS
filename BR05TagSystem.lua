@@ -53,11 +53,7 @@ local SOS_JOIN_PING_VOLUME = 0.10 -- 10 percent volume
 -- Optional per user intros (text popup, glitchy)
 -- CustomUserIntros[UserId] = { Text = "Hello", SoundId = "rbxassetid://123", TextColor = Color3.fromRGB(255,255,255) }
 local CustomUserIntros = {
-	[7452991350] = {
-		Text = "XTCY Has Been Summoned.",
-		SoundId = "rbxassetid://120403072198402",
-		TextColor = Color3.fromRGB(200, 0, 0),
-	},
+
 }
 
 
@@ -1550,7 +1546,7 @@ end
 local function tryShowCustomUserIntro(userId)
 	local plr = Players:GetPlayerByUserId(userId)
 	if not plr then return end
-	-- if plr.UserId == LocalPlayer.UserId then return end
+	if plr.UserId == LocalPlayer.UserId then return end
 	if CustomIntroShown[userId] then return end
 
 	local intro = CustomUserIntros[userId]
