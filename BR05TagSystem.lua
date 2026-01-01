@@ -31,6 +31,10 @@ local TAG_OFFSET_Y = 3
 local ORB_SIZE = 18
 local ORB_OFFSET_Y = 6.2
 
+-- Refresh button settings
+local REFRESH_EVENT_NAME = "event_modify_refresh"
+local REFRESH_HOTKEY = Enum.KeyCode.RightControl
+
 --------------------------------------------------------------------
 -- ARRIVAL FX + POPUPS
 --------------------------------------------------------------------
@@ -61,25 +65,11 @@ local CustomUserIntros = {
 }
 
 --------------------------------------------------------------------
--- ALWAYS SHOW TAGS (USERID)
--- Users in here will always show SOS tag even if they never sent the SOS marker
---------------------------------------------------------------------
-local AlwaysShowTags = {
-	-- [123456789] = true,
-	[5105522471] = true,
-	[7887807265] = true,
-	[1575141882] = true,
-	[196988708] = true,
-	[2630250935] = true,
-}
-
---------------------------------------------------------------------
 -- ROLES DATA
 --------------------------------------------------------------------
 local ROLE_COLOR = {
 	Normal = Color3.fromRGB(120, 190, 235),
 	Owner  = Color3.fromRGB(255, 255, 80),
-	CoOwner = Color3.fromRGB(255, 255, 80),
 	Tester = Color3.fromRGB(60, 255, 90),
 	Sin    = Color3.fromRGB(235, 70, 70),
 	OG     = Color3.fromRGB(160, 220, 255),
@@ -262,7 +252,7 @@ do
 end
 
 --------------------------------------------------------------------
--- TAG EFFECT PROFILES (FAST ASSIGN)
+-- TAG EFFECT PROFILES
 --------------------------------------------------------------------
 local YELLOW = Color3.fromRGB(255, 255, 0)
 local LIGHT_BLUE = Color3.fromRGB(120, 190, 235)
@@ -294,15 +284,15 @@ local TagEffectProfiles = {
 		Effects = { "Scanline", "Shimmer" },
 	},
 
-	-- Other current CustomTags IDs: yellow text, keep nice defaults
+	-- Other current CustomTags IDs: yellow text
 	[8299334811] = { Preset = "SKY_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
 	[9072904295] = { Preset = "RED_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
 	[7444930172] = { Preset = "RED_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
 
-	-- CoOwner (2630250935): yellow top text
+	-- CoOwner (2630250935)
 	[2630250935] = { Preset = "GREY_STEEL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Scanline", "Shimmer" } },
 
-	-- Shiroyasha (4689208231): yellow top text and fixed BounceText name
+	-- Shiroyasha (4689208231)
 	[4689208231] = {
 		Gradient1 = Color3.fromRGB(255, 255, 255),
 		Gradient2 = Color3.fromRGB(255, 255, 255),
@@ -319,7 +309,7 @@ local TagEffectProfiles = {
 	[196988708] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
 	[4926923208] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
 
-	-- Other CoOwners in your list get yellow top text
+	-- Other CoOwners
 	[9253548067] = { Preset = "GREY_STEEL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Scanline", "Shimmer" } },
 	[5348319883] = { Preset = "GREY_STEEL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Scanline", "Shimmer" } },
 }
@@ -331,13 +321,6 @@ local RoleEffectPresets = {
 	Owner = {
 		Preset = "BLACK_SOLID",
 		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
-		TopTextColor = YELLOW,
-		BottomTextColor = Color3.fromRGB(235, 235, 235),
-		ScrollGradient = true,
-	},
-	CoOwner = {
-		Preset = "GREY_STEEL",
-		Effects = { "Scanline", "Shimmer" },
 		TopTextColor = YELLOW,
 		BottomTextColor = Color3.fromRGB(235, 235, 235),
 		ScrollGradient = true,
@@ -415,6 +398,10 @@ local trailPanel
 local trailArrow
 local trailOpen = false
 local trailTween = nil
+
+local refreshBtn
+local refreshTip
+local refreshTipConn
 
 local ownerPresenceAnnounced = false
 local coOwnerPresenceAnnounced = false
@@ -552,6 +539,180 @@ local function trySendChat(text)
 	end
 
 	return false
+end
+
+--------------------------------------------------------------------
+-- REFRESH EVENT + BUTTON (TOP RIGHT ABOVE PLAYERLIST)
+--------------------------------------------------------------------
+local function findRefreshEvent()
+	local inst = ReplicatedStorage:FindFirstChild(REFRESH_EVENT_NAME)
+	if inst then return inst end
+	-- fallback search
+	for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
+		if d.Name == REFRESH_EVENT_NAME then
+			return d
+		end
+	end
+	return nil
+end
+
+local function refreshAllTags()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p and p.Character then
+			-- refresh tags after server refresh so they do not vanish
+			task.defer(function()
+				-- this function exists later, but defer is fine
+			end)
+		end
+	end
+end
+
+local function ensureRefreshTooltip()
+	ensureGui()
+	if refreshTip and refreshTip.Parent then return end
+
+	refreshTip = Instance.new("TextLabel")
+	refreshTip.Name = "RefreshTooltip"
+	refreshTip.BackgroundTransparency = 0.15
+	refreshTip.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+	refreshTip.BorderSizePixel = 0
+	refreshTip.Visible = false
+	refreshTip.ZIndex = 9000
+	refreshTip.Font = Enum.Font.Gotham
+	refreshTip.TextSize = 12
+	refreshTip.TextColor3 = Color3.fromRGB(255, 255, 255)
+	refreshTip.TextStrokeTransparency = 0.65
+	refreshTip.TextXAlignment = Enum.TextXAlignment.Left
+	refreshTip.TextYAlignment = Enum.TextYAlignment.Center
+	refreshTip.Text = "Tip: you can also trigger it with ctrl"
+	refreshTip.Size = UDim2.new(0, 260, 0, 22)
+	refreshTip.Parent = gui
+
+	makeCorner(refreshTip, 10)
+	makeStroke(refreshTip, 1, Color3.fromRGB(200, 40, 40), 0.25)
+end
+
+local function showRefreshTooltip()
+	ensureRefreshTooltip()
+	if not refreshTip then return end
+	refreshTip.Visible = true
+
+	if refreshTipConn then
+		pcall(function() refreshTipConn:Disconnect() end)
+		refreshTipConn = nil
+	end
+
+	refreshTipConn = RunService.RenderStepped:Connect(function()
+		if not refreshTip or not refreshTip.Parent then
+			pcall(function() refreshTipConn:Disconnect() end)
+			refreshTipConn = nil
+			return
+		end
+		local m = UserInputService:GetMouseLocation()
+		refreshTip.Position = UDim2.new(0, m.X + 16, 0, m.Y + 10)
+	end)
+end
+
+local function hideRefreshTooltip()
+	if refreshTipConn then
+		pcall(function() refreshTipConn:Disconnect() end)
+		refreshTipConn = nil
+	end
+	if refreshTip then
+		refreshTip.Visible = false
+	end
+end
+
+local refreshDebounce = false
+
+local function doRefresh()
+	if refreshDebounce then return end
+	refreshDebounce = true
+
+	local ev = findRefreshEvent()
+	if ev then
+		if ev:IsA("RemoteEvent") then
+			pcall(function() ev:FireServer() end)
+		elseif ev:IsA("BindableEvent") then
+			pcall(function() ev:Fire() end)
+		elseif ev:IsA("RemoteFunction") then
+			pcall(function() ev:InvokeServer() end)
+		end
+	end
+
+	-- Rebuild tags shortly after refresh so they do not go invisible.
+	task.delay(0.15, function()
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p and p.Character then
+				task.defer(function()
+					-- refreshAllTagsForPlayer exists later, this closure will run after it's defined
+					if _G.__SOS_REFRESH_TAGS_FOR_PLAYER then
+						_G.__SOS_REFRESH_TAGS_FOR_PLAYER(p)
+					end
+				end)
+			end
+		end
+		refreshDebounce = false
+	end)
+end
+
+local function ensureRefreshButton()
+	ensureGui()
+	if refreshBtn and refreshBtn.Parent then return end
+
+	refreshBtn = Instance.new("TextButton")
+	refreshBtn.Name = "RefreshButton"
+	refreshBtn.AnchorPoint = Vector2.new(1, 0)
+	-- This sits top right, above the PlayerList area
+	refreshBtn.Position = UDim2.new(1, -18, 0, 20)
+	refreshBtn.Size = UDim2.new(0, 140, 0, 36)
+	refreshBtn.BorderSizePixel = 0
+	refreshBtn.AutoButtonColor = true
+	refreshBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+	refreshBtn.BackgroundTransparency = 0.18
+	refreshBtn.Text = "Refresh"
+	refreshBtn.Font = Enum.Font.GothamBold
+	refreshBtn.TextSize = 14
+	refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	refreshBtn.Parent = gui
+
+	makeCorner(refreshBtn, 12)
+	makeStroke(refreshBtn, 2, Color3.fromRGB(200, 40, 40), 0.15)
+
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 38)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 12)),
+	})
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.10),
+		NumberSequenceKeypoint.new(1, 0.22),
+	})
+	g.Parent = refreshBtn
+
+	refreshBtn.MouseButton1Click:Connect(function()
+		doRefresh()
+	end)
+
+	refreshBtn.MouseEnter:Connect(function()
+		showRefreshTooltip()
+	end)
+
+	refreshBtn.MouseLeave:Connect(function()
+		hideRefreshTooltip()
+	end)
+
+	-- RightControl hotkey triggers the same action
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode ~= REFRESH_HOTKEY then return end
+		if refreshBtn and refreshBtn.Parent then
+			refreshBtn:Activate()
+		else
+			doRefresh()
+		end
+	end)
 end
 
 --------------------------------------------------------------------
@@ -897,7 +1058,6 @@ local function ensureTrailMenu()
 		{ "PRP", Color3.fromRGB(160, 120, 255), "Violet" },
 		{ "WHT", Color3.fromRGB(245, 245, 245), "White" },
 		{ "SLV", Color3.fromRGB(170, 170, 170), "Silver" },
-		{ "BLK", Color3.fromRGB(10, 10, 10), "Black" },
 	}
 
 	for _, item in ipairs(palette) do
@@ -992,10 +1152,6 @@ local function getSosRole(plr)
 		return "Owner"
 	end
 
-	if isCoOwner(plr) then
-		return "CoOwner"
-	end
-
 	if CustomTags[plr.UserId] then
 		return "Custom"
 	end
@@ -1004,8 +1160,7 @@ local function getSosRole(plr)
 		return "OG"
 	end
 
-	local allowed = (SosUsers[plr.UserId] == true) or (AlwaysShowTags[plr.UserId] == true)
-	if not allowed then
+	if not SosUsers[plr.UserId] then
 		return nil
 	end
 
@@ -1038,7 +1193,6 @@ end
 
 local function getTopLine(plr, role)
 	if role == "Owner" then return "Owner" end
-	if role == "CoOwner" then return "Co-Owner" end
 	if role == "Tester" then return "SOS Tester" end
 
 	if role == "Sin" then
@@ -1457,7 +1611,7 @@ local function applyTagEffects(plr, role, btn, baseGrad, stroke, topLabel, botto
 end
 
 --------------------------------------------------------------------
--- SPECIAL FX CORE (Lines / Lighting / Glitch aura) FIXED
+-- SPECIAL FX CORE (Lines / Lighting / Glitch aura)
 --------------------------------------------------------------------
 local function disconnectFxConn(userId)
 	local c = FxConnByUserId[userId]
@@ -1470,22 +1624,8 @@ end
 local function clearSpecialFx(plr)
 	if not plr or not plr.Character then return end
 	disconnectFxConn(plr.UserId)
-
-	local char = plr.Character
-	local folder = char:FindFirstChild(FX_FOLDER_NAME)
+	local folder = plr.Character:FindFirstChild(FX_FOLDER_NAME)
 	if folder then folder:Destroy() end
-
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-	if hrp then
-		local oldLight = hrp:FindFirstChild("SOS_FxLight")
-		if oldLight then oldLight:Destroy() end
-	end
-
-	for _, inst in ipairs(char:GetDescendants()) do
-		if inst:IsA("Attachment") and (inst.Name == "TrailA0" or inst.Name == "TrailA1") then
-			inst:Destroy()
-		end
-	end
 end
 
 local function makeTrailOnPart(part, parentFolder)
@@ -1518,7 +1658,6 @@ local function makeTrailOnPart(part, parentFolder)
 	})
 	tr.Lifetime = 0.12
 	tr.Enabled = false
-	tr.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
 	tr.Parent = parentFolder
 
 	return tr
@@ -1528,46 +1667,11 @@ local function resolveFxMode(isOwnerRole)
 	return isOwnerRole and (FxMode.Owner or "Lines") or (FxMode.CoOwner or "Lines")
 end
 
-local function normalizeMode(s)
-	s = tostring(s or "")
-	s = s:gsub("%s+", "")
-	s = s:lower()
-	return s
-end
-
-local function resolveFxColor(mode, t)
-	local m = normalizeMode(mode)
-	if m == "rainbow" or m == "rgb" then
-		return Color3.fromHSV((t * 0.18) % 1, 1, 1)
-	end
-	if m == "ice" then return Color3.fromRGB(140, 235, 255) end
-	if m == "red" then return Color3.fromRGB(255, 60, 60) end
-	if m == "neon" then return Color3.fromRGB(60, 255, 120) end
-	if m == "sun" then return Color3.fromRGB(255, 220, 80) end
-	if m == "violet" then return Color3.fromRGB(170, 120, 255) end
-	if m == "white" then return Color3.fromRGB(245, 245, 245) end
-	if m == "silver" then return Color3.fromRGB(170, 170, 170) end
-	if m == "black" then return Color3.fromRGB(15, 15, 15) end
-	return Color3.fromRGB(245, 245, 245)
-end
-
-local function rebuildSpecialFxFor(plr)
-	if not plr then return end
-	local role = getSosRole(plr)
-	if role == "Owner" or role == "CoOwner" then
-		-- fallthrough
-	else
-		clearSpecialFx(plr)
-		return
-	end
-	-- ensureSpecialFx below
-end
-
 local function ensureSpecialFx(plr, role)
 	if not plr or not plr.Character then return end
 
 	local isOwnerRole = (role == "Owner")
-	local isCoOwnerRole = (role == "CoOwner") or isCoOwner(plr)
+	local isCoOwnerRole = isCoOwner(plr)
 	local isSpecial = isOwnerRole or isCoOwnerRole
 
 	if not isSpecial then
@@ -1631,45 +1735,27 @@ local function ensureSpecialFx(plr, role)
 		local speed = hrp.Velocity.Magnitude
 		local moving = speed > 1.5
 
-		local colorMode = isOwnerRole and FxColorMode.Owner or FxColorMode.CoOwner
-		local c = resolveFxColor(colorMode, os.clock())
-
 		if trails then
 			for _, tr in ipairs(trails) do
 				tr.Enabled = moving
-				tr.Color = ColorSequence.new(c)
 			end
 		end
 
 		if light then
 			light.Brightness = moving and 2.6 or 0
-			light.Color = c
+			light.Color = Color3.fromRGB(200, 235, 255)
 		end
 
 		if hl then
 			local pulse = (math.sin(os.clock() * 10) * 0.5 + 0.5)
 			hl.FillTransparency = 0.25 + (pulse * 0.35)
 			hl.OutlineTransparency = 0.05 + (pulse * 0.25)
-			hl.FillColor = c
-			hl.OutlineColor = Color3.fromRGB(0, 0, 0)
+			hl.FillColor = Color3.fromRGB(255, 255, 255)
+			hl.OutlineColor = Color3.fromRGB(255, 60, 60)
 		end
 	end)
 
 	FxConnByUserId[plr.UserId] = conn
-end
-
-local function rebuildFxNowFor(plr)
-	if not plr then return end
-	local role = getSosRole(plr)
-	ensureSpecialFx(plr, role)
-end
-
-local function rebuildAllSpecialFx()
-	for _, p in ipairs(Players:GetPlayers()) do
-		if isOwner(p) or isCoOwner(p) then
-			rebuildFxNowFor(p)
-		end
-	end
 end
 
 --------------------------------------------------------------------
@@ -2090,6 +2176,9 @@ local function refreshAllTagsForPlayer(plr)
 	createAkOrbTag(plr)
 end
 
+-- Expose for the refresh button debounce rebuild (keeps tags from vanishing after refresh event)
+_G.__SOS_REFRESH_TAGS_FOR_PLAYER = refreshAllTagsForPlayer
+
 local function hookPlayer(plr)
 	if not plr then return end
 	plr.CharacterAdded:Connect(function()
@@ -2136,59 +2225,56 @@ local function onAkSeen(userId)
 end
 
 --------------------------------------------------------------------
--- COMMANDS (OWNER COOWNER ONLY) FIXED
--- Now they rebuild FX instantly and colour mode actually applies
+-- COMMANDS (OWNER COOWNER ONLY)
 --------------------------------------------------------------------
 local function applyCommandFrom(uid, text)
 	local plr = Players:GetPlayerByUserId(uid)
 
 	if text == CMD_OWNER_ON and plr and isOwner(plr) then
 		FxEnabled.Owner = true
-		rebuildFxNowFor(plr)
+		if plr.Character then refreshAllTagsForPlayer(plr) end
 		return true
 	end
 	if text == CMD_OWNER_OFF and plr and isOwner(plr) then
 		FxEnabled.Owner = false
-		rebuildFxNowFor(plr)
+		for _, p in ipairs(Players:GetPlayers()) do
+			if isOwner(p) then clearSpecialFx(p) end
+		end
 		return true
 	end
 
 	if text == CMD_COOWNER_ON and plr and isCoOwner(plr) then
 		FxEnabled.CoOwner = true
-		rebuildFxNowFor(plr)
+		if plr.Character then refreshAllTagsForPlayer(plr) end
 		return true
 	end
 	if text == CMD_COOWNER_OFF and plr and isCoOwner(plr) then
 		FxEnabled.CoOwner = false
-		rebuildFxNowFor(plr)
+		if plr then clearSpecialFx(plr) end
 		return true
 	end
 
 	if text:sub(1, #CMD_OWNER_COLOR_PREFIX) == CMD_OWNER_COLOR_PREFIX and plr and isOwner(plr) then
 		local mode = text:sub(#CMD_OWNER_COLOR_PREFIX + 1)
 		if mode ~= "" then FxColorMode.Owner = mode end
-		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_COOWNER_COLOR_PREFIX) == CMD_COOWNER_COLOR_PREFIX and plr and isCoOwner(plr) then
 		local mode = text:sub(#CMD_COOWNER_COLOR_PREFIX + 1)
 		if mode ~= "" then FxColorMode.CoOwner = mode end
-		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_OWNER_FX_PREFIX) == CMD_OWNER_FX_PREFIX and plr and isOwner(plr) then
 		local mode = text:sub(#CMD_OWNER_FX_PREFIX + 1)
 		if mode ~= "" then FxMode.Owner = mode end
-		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_COOWNER_FX_PREFIX) == CMD_COOWNER_FX_PREFIX and plr and isCoOwner(plr) then
 		local mode = text:sub(#CMD_COOWNER_FX_PREFIX + 1)
 		if mode ~= "" then FxMode.CoOwner = mode end
-		rebuildFxNowFor(plr)
 		return true
 	end
 
@@ -2253,15 +2339,6 @@ local function hookChatListeners()
 		end)
 	end
 
-	-- Outgoing hook so your commands always apply even if Player.Chatted is unreliable
-	if TextChatService and TextChatService.SendingMessage then
-		TextChatService.SendingMessage:Connect(function(msg)
-			if not msg then return end
-			local text = msg.Text or ""
-			handleIncoming(LocalPlayer.UserId, text)
-		end)
-	end
-
 	local function hookChatted(plr)
 		pcall(function()
 			plr.Chatted:Connect(function(message)
@@ -2287,6 +2364,7 @@ local function init()
 	ensureBroadcastPanel()
 	ensureSfxPanel()
 	ensureTrailMenu()
+	ensureRefreshButton()
 
 	if broadcastSOS then
 		broadcastSOS.MouseButton1Click:Connect(function()
@@ -2314,10 +2392,6 @@ local function init()
 		task.delay(0.2, function()
 			tryShowCustomUserIntro(plr.UserId)
 		end)
-
-		task.delay(0.25, function()
-			rebuildAllSpecialFx()
-		end)
 	end)
 
 	Players.PlayerRemoving:Connect(function(plr)
@@ -2341,147 +2415,14 @@ local function init()
 	onSosActivated(LocalPlayer.UserId)
 	trySendChat(SOS_ACTIVATE_MARKER)
 
-	-- make sure owner and coowner FX exist instantly
-	rebuildAllSpecialFx()
+	-- If the refresh event is missing, still keep the button, it just won't fire anything.
+	local ev = findRefreshEvent()
+	if not ev then
+		warn("Refresh event not found: " .. REFRESH_EVENT_NAME)
+	end
 
-	print("SOS Tags loaded. Commands restored. FX rebuild and colour modes fixed. XTCY intro enabled.")
+	-- British humour safety check: if this breaks, it's not my fault, it's Roblox.
+	print("SOS Tags loaded. Refresh button ready. RightControl hotkey enabled.")
 end
 
 task.delay(INIT_DELAY, init)
-
---------------------------------------------------------------------
--- QUICK EXAMPLES FOR PRESETS
--- TagEffectProfiles[123] = { Preset = "RED_SCROLL" }
--- TagEffectProfiles[123] = { Preset = "BLUE_SPIN" }
--- TagEffectProfiles[123] = { Preset = "BLACK_SOLID" }
--- TagEffectProfiles[123] = { Preset = "WHITE_SOLID" }
--- TagEffectProfiles[123] = { Preset = "RAINBOW_SPIN" }
--- TagEffectProfiles[123] = { Preset = "RAINBOW_SCROLL" }
--- TagEffectProfiles[123] = { Preset = "PURPLE_SCROLL", Effects = { "Pulse", "Scanline", "Sparkles" } }
--- TagEffectProfiles[123] = { Preset = "YELLOW_SCROLL", TopTextColor = Color3.fromRGB(0,0,0) }
---------------------------------------------------------------------
-
--- TOP RIGHT REFRESH BUTTON (SOS glass style)
--- Triggers: ReplicatedStorage.event_modify_refresh
-
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-
-local LocalPlayer = Players.LocalPlayer
-
-local function createTopRightRefreshButton()
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-	-- avoid duplicates
-	local old = playerGui:FindFirstChild("SOS_RefreshButton")
-	if old then old:Destroy() end
-
-	local refreshGui = Instance.new("ScreenGui")
-	refreshGui.Name = "SOS_RefreshButton"
-	refreshGui.ResetOnSpawn = false
-	refreshGui.IgnoreGuiInset = true
-	refreshGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	refreshGui.Parent = playerGui
-
-	-- holder so we can animate nicely
-	local holder = Instance.new("Frame")
-	holder.Name = "Holder"
-	holder.AnchorPoint = Vector2.new(1, 0)
-	holder.Position = UDim2.new(1, -12, 0, 10)
-	holder.Size = UDim2.new(0, 128, 0, 38) -- bigger than before
-	holder.BackgroundTransparency = 1
-	holder.BorderSizePixel = 0
-	holder.Parent = refreshGui
-
-	local btn = Instance.new("TextButton")
-	btn.Name = "Refresh"
-	btn.Size = UDim2.new(1, 0, 1, 0)
-	btn.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-	btn.BackgroundTransparency = 0.18
-	btn.BorderSizePixel = 0
-	btn.AutoButtonColor = false
-	btn.Text = "Refresh"
-	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = 14
-	btn.TextColor3 = Color3.fromRGB(245, 245, 245)
-	btn.Parent = holder
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 14)
-	corner.Parent = btn
-
-	local grad = Instance.new("UIGradient")
-	grad.Rotation = 90
-	grad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 22)),
-		ColorSequenceKeypoint.new(0.4, Color3.fromRGB(10, 10, 12)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 6, 8)),
-	})
-	grad.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.05),
-		NumberSequenceKeypoint.new(1, 0.20),
-	})
-	grad.Parent = btn
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(200, 40, 40)
-	stroke.Thickness = 2
-	stroke.Transparency = 0.10
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = btn
-
-	-- subtle hover/press feel like the rest of SOS UI
-	local function tweenTo(props, t)
-		TweenService:Create(btn, TweenInfo.new(t or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
-	end
-	local function tweenStrokeTo(props, t)
-		TweenService:Create(stroke, TweenInfo.new(t or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
-	end
-
-	btn.MouseEnter:Connect(function()
-		tweenTo({ BackgroundTransparency = 0.12 }, 0.12)
-		tweenStrokeTo({ Transparency = 0.02 }, 0.12)
-	end)
-
-	btn.MouseLeave:Connect(function()
-		tweenTo({ BackgroundTransparency = 0.18 }, 0.12)
-		tweenStrokeTo({ Transparency = 0.10 }, 0.12)
-	end)
-
-	btn.MouseButton1Down:Connect(function()
-		tweenTo({ BackgroundTransparency = 0.06 }, 0.06)
-	end)
-
-	btn.MouseButton1Up:Connect(function()
-		tweenTo({ BackgroundTransparency = 0.12 }, 0.10)
-	end)
-
-	-- fire the refresh event
-	local ev = ReplicatedStorage:FindFirstChild("event_modify_refresh")
-
-	btn.MouseButton1Click:Connect(function()
-		if not ev then
-			ev = ReplicatedStorage:FindFirstChild("event_modify_refresh")
-		end
-
-		if not ev then
-			warn("Refresh event not found: ReplicatedStorage.event_modify_refresh")
-			return
-		end
-
-		if ev:IsA("RemoteEvent") then
-			ev:FireServer()
-			return
-		end
-
-		if ev:IsA("BindableEvent") then
-			ev:Fire()
-			return
-		end
-
-		warn("event_modify_refresh exists but is not a RemoteEvent or BindableEvent")
-	end)
-end
-
-createTopRightRefreshButton()
