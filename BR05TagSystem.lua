@@ -284,7 +284,8 @@ local TagEffectProfiles = {
 		BottomTextColor = Color3.fromRGB(240, 240, 240),
 		Effects = { "Scanline", "Shimmer" },
 	},
--- Sam (7452991350): red, dark red, red
+	
+	-- Shiroyasha (4689208231): whatever style
 	[4689208231] = {
 		Gradient1 = BLUE,
 		Gradient2 = PURPLE,
@@ -295,7 +296,8 @@ local TagEffectProfiles = {
 		BottomTextColor = Color3.fromRGB(240, 240, 240),
 		Effects = { "Scanline", "Shimmer" },
 	},
-	},
+}
+
 
 	-- Other current CustomTags IDs: yellow text
 	[8299334811] = { Preset = "SKY_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
