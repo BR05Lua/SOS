@@ -61,11 +61,20 @@ local CustomUserIntros = {
 }
 
 --------------------------------------------------------------------
+-- ALWAYS SHOW TAGS (USERID)
+-- Users in here will always show SOS tag even if they never sent the SOS marker
+--------------------------------------------------------------------
+local AlwaysShowTags = {
+	-- [123456789] = true,
+}
+
+--------------------------------------------------------------------
 -- ROLES DATA
 --------------------------------------------------------------------
 local ROLE_COLOR = {
 	Normal = Color3.fromRGB(120, 190, 235),
 	Owner  = Color3.fromRGB(255, 255, 80),
+	CoOwner = Color3.fromRGB(255, 255, 80),
 	Tester = Color3.fromRGB(60, 255, 90),
 	Sin    = Color3.fromRGB(235, 70, 70),
 	OG     = Color3.fromRGB(160, 220, 255),
@@ -249,13 +258,6 @@ end
 
 --------------------------------------------------------------------
 -- TAG EFFECT PROFILES (FAST ASSIGN)
--- Your request:
--- All current userIds in this script get yellow top text (except Sins which are red)
--- Sins gradient = red, black, red
--- Normal users use normal light blue top text
--- Ghoul = purple, white, black
--- XTCY = red, dark red, red
--- XTCY custom intro already set above
 --------------------------------------------------------------------
 local YELLOW = Color3.fromRGB(255, 255, 0)
 local LIGHT_BLUE = Color3.fromRGB(120, 190, 235)
@@ -307,7 +309,7 @@ local TagEffectProfiles = {
 		Effects = { "Pulse", "Scanline", "BounceText" },
 	},
 
-	-- Owners also get yellow top text (already yellow, but explicit)
+	-- Owners explicit
 	[433636433] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
 	[196988708] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
 	[4926923208] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
@@ -318,10 +320,7 @@ local TagEffectProfiles = {
 }
 
 --------------------------------------------------------------------
--- ROLE DEFAULTS (used when user has no TagEffectProfiles entry)
--- Your request:
--- Sins are red, black, red
--- Normal users are normal light blue
+-- ROLE DEFAULTS
 --------------------------------------------------------------------
 local RoleEffectPresets = {
 	Owner = {
@@ -331,8 +330,14 @@ local RoleEffectPresets = {
 		BottomTextColor = Color3.fromRGB(235, 235, 235),
 		ScrollGradient = true,
 	},
+	CoOwner = {
+		Preset = "GREY_STEEL",
+		Effects = { "Scanline", "Shimmer" },
+		TopTextColor = YELLOW,
+		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		ScrollGradient = true,
+	},
 	Sin = {
-		-- Red, black, red for all sins
 		Gradient1 = RED,
 		Gradient2 = Color3.fromRGB(0, 0, 0),
 		Gradient3 = RED,
@@ -887,6 +892,7 @@ local function ensureTrailMenu()
 		{ "PRP", Color3.fromRGB(160, 120, 255), "Violet" },
 		{ "WHT", Color3.fromRGB(245, 245, 245), "White" },
 		{ "SLV", Color3.fromRGB(170, 170, 170), "Silver" },
+		{ "BLK", Color3.fromRGB(10, 10, 10), "Black" },
 	}
 
 	for _, item in ipairs(palette) do
@@ -981,6 +987,10 @@ local function getSosRole(plr)
 		return "Owner"
 	end
 
+	if isCoOwner(plr) then
+		return "CoOwner"
+	end
+
 	if CustomTags[plr.UserId] then
 		return "Custom"
 	end
@@ -989,7 +999,8 @@ local function getSosRole(plr)
 		return "OG"
 	end
 
-	if not SosUsers[plr.UserId] then
+	local allowed = (SosUsers[plr.UserId] == true) or (AlwaysShowTags[plr.UserId] == true)
+	if not allowed then
 		return nil
 	end
 
@@ -1022,6 +1033,7 @@ end
 
 local function getTopLine(plr, role)
 	if role == "Owner" then return "Owner" end
+	if role == "CoOwner" then return "Co-Owner" end
 	if role == "Tester" then return "SOS Tester" end
 
 	if role == "Sin" then
@@ -1440,7 +1452,7 @@ local function applyTagEffects(plr, role, btn, baseGrad, stroke, topLabel, botto
 end
 
 --------------------------------------------------------------------
--- SPECIAL FX CORE (Lines / Lighting / Glitch aura)
+-- SPECIAL FX CORE (Lines / Lighting / Glitch aura) FIXED
 --------------------------------------------------------------------
 local function disconnectFxConn(userId)
 	local c = FxConnByUserId[userId]
@@ -1453,8 +1465,22 @@ end
 local function clearSpecialFx(plr)
 	if not plr or not plr.Character then return end
 	disconnectFxConn(plr.UserId)
-	local folder = plr.Character:FindFirstChild(FX_FOLDER_NAME)
+
+	local char = plr.Character
+	local folder = char:FindFirstChild(FX_FOLDER_NAME)
 	if folder then folder:Destroy() end
+
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		local oldLight = hrp:FindFirstChild("SOS_FxLight")
+		if oldLight then oldLight:Destroy() end
+	end
+
+	for _, inst in ipairs(char:GetDescendants()) do
+		if inst:IsA("Attachment") and (inst.Name == "TrailA0" or inst.Name == "TrailA1") then
+			inst:Destroy()
+		end
+	end
 end
 
 local function makeTrailOnPart(part, parentFolder)
@@ -1487,6 +1513,7 @@ local function makeTrailOnPart(part, parentFolder)
 	})
 	tr.Lifetime = 0.12
 	tr.Enabled = false
+	tr.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
 	tr.Parent = parentFolder
 
 	return tr
@@ -1496,11 +1523,46 @@ local function resolveFxMode(isOwnerRole)
 	return isOwnerRole and (FxMode.Owner or "Lines") or (FxMode.CoOwner or "Lines")
 end
 
+local function normalizeMode(s)
+	s = tostring(s or "")
+	s = s:gsub("%s+", "")
+	s = s:lower()
+	return s
+end
+
+local function resolveFxColor(mode, t)
+	local m = normalizeMode(mode)
+	if m == "rainbow" or m == "rgb" then
+		return Color3.fromHSV((t * 0.18) % 1, 1, 1)
+	end
+	if m == "ice" then return Color3.fromRGB(140, 235, 255) end
+	if m == "red" then return Color3.fromRGB(255, 60, 60) end
+	if m == "neon" then return Color3.fromRGB(60, 255, 120) end
+	if m == "sun" then return Color3.fromRGB(255, 220, 80) end
+	if m == "violet" then return Color3.fromRGB(170, 120, 255) end
+	if m == "white" then return Color3.fromRGB(245, 245, 245) end
+	if m == "silver" then return Color3.fromRGB(170, 170, 170) end
+	if m == "black" then return Color3.fromRGB(15, 15, 15) end
+	return Color3.fromRGB(245, 245, 245)
+end
+
+local function rebuildSpecialFxFor(plr)
+	if not plr then return end
+	local role = getSosRole(plr)
+	if role == "Owner" or role == "CoOwner" then
+		-- fallthrough
+	else
+		clearSpecialFx(plr)
+		return
+	end
+	-- ensureSpecialFx below
+end
+
 local function ensureSpecialFx(plr, role)
 	if not plr or not plr.Character then return end
 
 	local isOwnerRole = (role == "Owner")
-	local isCoOwnerRole = isCoOwner(plr)
+	local isCoOwnerRole = (role == "CoOwner") or isCoOwner(plr)
 	local isSpecial = isOwnerRole or isCoOwnerRole
 
 	if not isSpecial then
@@ -1564,27 +1626,45 @@ local function ensureSpecialFx(plr, role)
 		local speed = hrp.Velocity.Magnitude
 		local moving = speed > 1.5
 
+		local colorMode = isOwnerRole and FxColorMode.Owner or FxColorMode.CoOwner
+		local c = resolveFxColor(colorMode, os.clock())
+
 		if trails then
 			for _, tr in ipairs(trails) do
 				tr.Enabled = moving
+				tr.Color = ColorSequence.new(c)
 			end
 		end
 
 		if light then
 			light.Brightness = moving and 2.6 or 0
-			light.Color = Color3.fromRGB(200, 235, 255)
+			light.Color = c
 		end
 
 		if hl then
 			local pulse = (math.sin(os.clock() * 10) * 0.5 + 0.5)
 			hl.FillTransparency = 0.25 + (pulse * 0.35)
 			hl.OutlineTransparency = 0.05 + (pulse * 0.25)
-			hl.FillColor = Color3.fromRGB(255, 255, 255)
-			hl.OutlineColor = Color3.fromRGB(255, 60, 60)
+			hl.FillColor = c
+			hl.OutlineColor = Color3.fromRGB(0, 0, 0)
 		end
 	end)
 
 	FxConnByUserId[plr.UserId] = conn
+end
+
+local function rebuildFxNowFor(plr)
+	if not plr then return end
+	local role = getSosRole(plr)
+	ensureSpecialFx(plr, role)
+end
+
+local function rebuildAllSpecialFx()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if isOwner(p) or isCoOwner(p) then
+			rebuildFxNowFor(p)
+		end
+	end
 end
 
 --------------------------------------------------------------------
@@ -2051,56 +2131,59 @@ local function onAkSeen(userId)
 end
 
 --------------------------------------------------------------------
--- COMMANDS (OWNER COOWNER ONLY)
+-- COMMANDS (OWNER COOWNER ONLY) FIXED
+-- Now they rebuild FX instantly and colour mode actually applies
 --------------------------------------------------------------------
 local function applyCommandFrom(uid, text)
 	local plr = Players:GetPlayerByUserId(uid)
 
 	if text == CMD_OWNER_ON and plr and isOwner(plr) then
 		FxEnabled.Owner = true
-		if plr.Character then refreshAllTagsForPlayer(plr) end
+		rebuildFxNowFor(plr)
 		return true
 	end
 	if text == CMD_OWNER_OFF and plr and isOwner(plr) then
 		FxEnabled.Owner = false
-		for _, p in ipairs(Players:GetPlayers()) do
-			if isOwner(p) then clearSpecialFx(p) end
-		end
+		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text == CMD_COOWNER_ON and plr and isCoOwner(plr) then
 		FxEnabled.CoOwner = true
-		if plr.Character then refreshAllTagsForPlayer(plr) end
+		rebuildFxNowFor(plr)
 		return true
 	end
 	if text == CMD_COOWNER_OFF and plr and isCoOwner(plr) then
 		FxEnabled.CoOwner = false
-		if plr then clearSpecialFx(plr) end
+		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_OWNER_COLOR_PREFIX) == CMD_OWNER_COLOR_PREFIX and plr and isOwner(plr) then
 		local mode = text:sub(#CMD_OWNER_COLOR_PREFIX + 1)
 		if mode ~= "" then FxColorMode.Owner = mode end
+		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_COOWNER_COLOR_PREFIX) == CMD_COOWNER_COLOR_PREFIX and plr and isCoOwner(plr) then
 		local mode = text:sub(#CMD_COOWNER_COLOR_PREFIX + 1)
 		if mode ~= "" then FxColorMode.CoOwner = mode end
+		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_OWNER_FX_PREFIX) == CMD_OWNER_FX_PREFIX and plr and isOwner(plr) then
 		local mode = text:sub(#CMD_OWNER_FX_PREFIX + 1)
 		if mode ~= "" then FxMode.Owner = mode end
+		rebuildFxNowFor(plr)
 		return true
 	end
 
 	if text:sub(1, #CMD_COOWNER_FX_PREFIX) == CMD_COOWNER_FX_PREFIX and plr and isCoOwner(plr) then
 		local mode = text:sub(#CMD_COOWNER_FX_PREFIX + 1)
 		if mode ~= "" then FxMode.CoOwner = mode end
+		rebuildFxNowFor(plr)
 		return true
 	end
 
@@ -2165,6 +2248,15 @@ local function hookChatListeners()
 		end)
 	end
 
+	-- Outgoing hook so your commands always apply even if Player.Chatted is unreliable
+	if TextChatService and TextChatService.SendingMessage then
+		TextChatService.SendingMessage:Connect(function(msg)
+			if not msg then return end
+			local text = msg.Text or ""
+			handleIncoming(LocalPlayer.UserId, text)
+		end)
+	end
+
 	local function hookChatted(plr)
 		pcall(function()
 			plr.Chatted:Connect(function(message)
@@ -2214,9 +2306,12 @@ local function init()
 		RepliedToActivationUserId[plr.UserId] = nil
 		task.defer(reconcilePresence)
 
-		-- Optional: show custom intro on join (kept subtle, does nothing unless they exist in CustomUserIntros)
 		task.delay(0.2, function()
 			tryShowCustomUserIntro(plr.UserId)
+		end)
+
+		task.delay(0.25, function()
+			rebuildAllSpecialFx()
 		end)
 	end)
 
@@ -2241,7 +2336,10 @@ local function init()
 	onSosActivated(LocalPlayer.UserId)
 	trySendChat(SOS_ACTIVATE_MARKER)
 
-	print("SOS Tags loaded. Presets ready. Menus restored. XTCY intro enabled.")
+	-- make sure owner and coowner FX exist instantly
+	rebuildAllSpecialFx()
+
+	print("SOS Tags loaded. Commands restored. FX rebuild and colour modes fixed. XTCY intro enabled.")
 end
 
 task.delay(INIT_DELAY, init)
