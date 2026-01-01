@@ -114,6 +114,7 @@ local SinProfiles = {
 
 local OgProfiles = {
 	-- keep blank unless you use it
+	[2440542440] = true,
 }
 
 -- Current CustomTags userIds you asked to keep
