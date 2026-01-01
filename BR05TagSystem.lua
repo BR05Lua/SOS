@@ -2360,3 +2360,128 @@ task.delay(INIT_DELAY, init)
 -- TagEffectProfiles[123] = { Preset = "PURPLE_SCROLL", Effects = { "Pulse", "Scanline", "Sparkles" } }
 -- TagEffectProfiles[123] = { Preset = "YELLOW_SCROLL", TopTextColor = Color3.fromRGB(0,0,0) }
 --------------------------------------------------------------------
+
+-- TOP RIGHT REFRESH BUTTON (SOS glass style)
+-- Triggers: ReplicatedStorage.event_modify_refresh
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local function createTopRightRefreshButton()
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+	-- avoid duplicates
+	local old = playerGui:FindFirstChild("SOS_RefreshButton")
+	if old then old:Destroy() end
+
+	local refreshGui = Instance.new("ScreenGui")
+	refreshGui.Name = "SOS_RefreshButton"
+	refreshGui.ResetOnSpawn = false
+	refreshGui.IgnoreGuiInset = true
+	refreshGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	refreshGui.Parent = playerGui
+
+	-- holder so we can animate nicely
+	local holder = Instance.new("Frame")
+	holder.Name = "Holder"
+	holder.AnchorPoint = Vector2.new(1, 0)
+	holder.Position = UDim2.new(1, -12, 0, 10)
+	holder.Size = UDim2.new(0, 128, 0, 38) -- bigger than before
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.Parent = refreshGui
+
+	local btn = Instance.new("TextButton")
+	btn.Name = "Refresh"
+	btn.Size = UDim2.new(1, 0, 1, 0)
+	btn.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+	btn.BackgroundTransparency = 0.18
+	btn.BorderSizePixel = 0
+	btn.AutoButtonColor = false
+	btn.Text = "Refresh"
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 14
+	btn.TextColor3 = Color3.fromRGB(245, 245, 245)
+	btn.Parent = holder
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 14)
+	corner.Parent = btn
+
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 22)),
+		ColorSequenceKeypoint.new(0.4, Color3.fromRGB(10, 10, 12)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 6, 8)),
+	})
+	grad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(1, 0.20),
+	})
+	grad.Parent = btn
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(200, 40, 40)
+	stroke.Thickness = 2
+	stroke.Transparency = 0.10
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = btn
+
+	-- subtle hover/press feel like the rest of SOS UI
+	local function tweenTo(props, t)
+		TweenService:Create(btn, TweenInfo.new(t or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+	end
+	local function tweenStrokeTo(props, t)
+		TweenService:Create(stroke, TweenInfo.new(t or 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+	end
+
+	btn.MouseEnter:Connect(function()
+		tweenTo({ BackgroundTransparency = 0.12 }, 0.12)
+		tweenStrokeTo({ Transparency = 0.02 }, 0.12)
+	end)
+
+	btn.MouseLeave:Connect(function()
+		tweenTo({ BackgroundTransparency = 0.18 }, 0.12)
+		tweenStrokeTo({ Transparency = 0.10 }, 0.12)
+	end)
+
+	btn.MouseButton1Down:Connect(function()
+		tweenTo({ BackgroundTransparency = 0.06 }, 0.06)
+	end)
+
+	btn.MouseButton1Up:Connect(function()
+		tweenTo({ BackgroundTransparency = 0.12 }, 0.10)
+	end)
+
+	-- fire the refresh event
+	local ev = ReplicatedStorage:FindFirstChild("event_modify_refresh")
+
+	btn.MouseButton1Click:Connect(function()
+		if not ev then
+			ev = ReplicatedStorage:FindFirstChild("event_modify_refresh")
+		end
+
+		if not ev then
+			warn("Refresh event not found: ReplicatedStorage.event_modify_refresh")
+			return
+		end
+
+		if ev:IsA("RemoteEvent") then
+			ev:FireServer()
+			return
+		end
+
+		if ev:IsA("BindableEvent") then
+			ev:Fire()
+			return
+		end
+
+		warn("event_modify_refresh exists but is not a RemoteEvent or BindableEvent")
+	end)
+end
+
+createTopRightRefreshButton()
