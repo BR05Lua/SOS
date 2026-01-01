@@ -116,7 +116,7 @@ local CustomTags = {
 	[7444930172] = { TagText = "OG XTCY", Color = Color3.fromRGB(200, 0, 0) },
 	[2630250935] = { TagText = "Co-Owner", Color = Color3.fromRGB(172, 233, 255) },
 	[754232813]  = { TagText = "OG Ghoul" },
-	[4689208231] = { TagText = "OG Shiroyasha", Color = Color3.fromRGB(255, 255, 255) },
+	[4689208231] = { TagText = "OG Shiroyasha" },
 }
 
 --------------------------------------------------------------------
@@ -252,6 +252,16 @@ local TagEffectProfiles = {
 	-- Example custom: Purple to Black to White with yellow top text, pulse and scanlines
 	[754232813] = {
 		Gradient1 = Color3.fromRGB(140, 0, 255),
+		Gradient2 = Color3.fromRGB(255, 255, 255),
+		Gradient3 = Color3.fromRGB(0, 0, 0),
+		SpinGradient = false,
+		ScrollGradient = false,
+		TopTextColor = Color3.fromRGB(255, 255, 0),
+		BottomTextColor = Color3.fromRGB(220, 220, 220),
+		Effects = { "Pulse", "Scanline" },
+	},
+	[4689208231] = {
+		Gradient1 = Color3.fromRGB(255, 255, 255),
 		Gradient2 = Color3.fromRGB(255, 255, 255),
 		Gradient3 = Color3.fromRGB(0, 0, 0),
 		SpinGradient = false,
