@@ -125,11 +125,6 @@ local SinProfiles = {
 
 -- Can be: true OR { OgName = "Something", Color = Color3.fromRGB(...) }
 local OgProfiles = {
-
-}
-
--- Custom tags (NOTE: duplicate keys removed so the script does not explode quietly)
-local CustomTags = {
 [2630250935] = { TagText = "Co-Owner" },
 [8299334811] = { OgName = "Fake Cinny" },
 [7452991350] = { OgName = "OG XTCY" },
@@ -139,6 +134,11 @@ local CustomTags = {
 [9243834086] = { OgName = "Audio Sam" },
 [4689208231] = { OgName = "Shiroyasha" },
 [2440542440] = { OgName = "Maze" },
+}
+
+-- Custom tags (NOTE: duplicate keys removed so the script does not explode quietly)
+local CustomTags = {
+
 }
 
 --------------------------------------------------------------------
