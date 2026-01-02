@@ -284,7 +284,7 @@ local TagEffectProfiles = {
 
 	-- XTCY Extavious
 	[7444930172] = {
-		Gradient1 = Color3.fromRGB(255, 0, 0),
+	Gradient1 = Color3.fromRGB(255, 0, 0),
 		Gradient2 = Color3.fromRGB(255, 0, 0),
 		Gradient3 = Color3.fromRGB(0, 0, 0),
 		SpinGradient = true,
@@ -296,7 +296,7 @@ local TagEffectProfiles = {
 
 	-- XTCY Wazz0ck_banned
 	[9072904295] = {
-		Gradient1 = Color3.fromRGB(255, 0, 0),
+	Gradient1 = Color3.fromRGB(255, 0, 0),
 		Gradient2 = Color3.fromRGB(255, 0, 0),
 		Gradient3 = Color3.fromRGB(0, 0, 0),
 		SpinGradient = true,
