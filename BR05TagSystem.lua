@@ -273,31 +273,31 @@ local TagEffectProfiles = {
 
 	-- XTCY vvv
 	[7452991350] = {
-	Gradient1 = Color3.fromRGB(255, 0, 0),
-	Gradient2 = Color3.fromRGB(255, 0, 0),
-	Gradient3 = BLACK,
-	SpinGradient = true,
-	ScrollGradient = false,
-	TopTextColor = YELLOW,
-	BottomTextColor = YELLOW,
-	Effects = { "Scanline", "Shimmer" },
+	    Gradient1 = Color3.fromRGB(255, 0, 0),
+    	Gradient2 = Color3.fromRGB(255, 0, 0),
+    	Gradient3 = BLACK,
+    	SpinGradient = true,
+    	ScrollGradient = false,
+    	TopTextColor = YELLOW,
+    	BottomTextColor = YELLOW,
+    	Effects = { "Scanline", "Shimmer" },
 	},
 
 	-- XTCY Extavious
 	[7444930172] = {
-	Gradient1 = Color3.fromRGB(255, 0, 0),
-	Gradient2 = Color3.fromRGB(255, 0, 0),
-	Gradient3 = BLACK,
-	SpinGradient = true,
-	ScrollGradient = false,
-	TopTextColor = YELLOW,
-	BottomTextColor = YELLOW,
-	Effects = { "Scanline", "Shimmer" },
+    	Gradient1 = Color3.fromRGB(255, 0, 0),
+    	Gradient2 = Color3.fromRGB(255, 0, 0),
+	    Gradient3 = BLACK,
+    	SpinGradient = true,
+    	ScrollGradient = false,
+    	TopTextColor = YELLOW,
+    	BottomTextColor = YELLOW,
+    	Effects = { "Scanline", "Shimmer" },
 	},
 
 	-- XTCY Wazz0ck_banned
 	[9072904295] = {
-	Gradient1 = Color3.fromRGB(255, 0, 0),
+    	Gradient1 = Color3.fromRGB(255, 0, 0),
 		Gradient2 = Color3.fromRGB(255, 0, 0),
 		Gradient3 = BLACK,
 		SpinGradient = true,
