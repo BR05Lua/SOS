@@ -81,6 +81,7 @@ local CustomUserIntros = {
 local ROLE_COLOR = {
 	Normal = Color3.fromRGB(120, 190, 235),
 	Owner  = Color3.fromRGB(255, 255, 80),
+	CoOwner = Color3.fromRGB(125, 216, 215),
 	Tester = Color3.fromRGB(60, 255, 90),
 	Sin    = Color3.fromRGB(235, 70, 70),
 	OG     = Color3.fromRGB(160, 220, 255),
@@ -128,17 +129,16 @@ local OgProfiles = {
 
 }
 
--- Custom tags (NOTE: duplicate keys removed so the script does not explode quietly)
+-- Custom tags
 local CustomTags = {
-    [2630250935] = { TagText = "Co-Owner" },
-    [8299334811] = { TagText = "Fake Cinny" },
-    [7452991350] = { TagText = "OG XTCY" },
-    [9072904295] = { TagText = "OG XTCY" },
-    [7444930172] = { TagText = "OG XTCY" },
-    [754232813]  = { TagText = "Ghoul" },
-    [9243834086] = { TagText = "Audio Sam" },
-    [4689208231] = { TagText = "Shiroyasha" },
-    [2440542440] = { TagText = "Maze" },
+	[2630250935] = { TagText = "Co-Owner" },
+	[8299334811] = { TagText = "Fake Cinny" },
+	[7452991350] = { TagText = "OG XTCY" },
+	[9072904295] = { TagText = "OG XTCY" },
+	[7444930172] = { TagText = "OG XTCY" },
+	[754232813]  = { TagText = "Ghoul" },
+	[9243834086] = { TagText = "Audio Sam" },
+	[4689208231] = { TagText = "Shiroyasha" },
 	[2440542440] = { TagText = "Maze" },
 }
 
@@ -245,12 +245,11 @@ do
 end
 
 --------------------------------------------------------------------
--- TAG EFFECT PROFILES (FIXED: no undefined colors, no duplicate keys)
+-- TAG EFFECT PROFILES (DEDUPED + CONSISTENT IDS)
 --------------------------------------------------------------------
 local YELLOW = Color3.fromRGB(255, 255, 0)
 local LIGHT_BLUE = Color3.fromRGB(120, 190, 235)
 local RED = Color3.fromRGB(255, 60, 60)
-local DARK_RED = Color3.fromRGB(140, 0, 0)
 
 local SAM_BLUE = Color3.fromRGB(70, 120, 255)
 local SAM_PURPLE = Color3.fromRGB(170, 80, 255)
@@ -260,7 +259,7 @@ local AMBER = Color3.fromRGB(255, 190, 70)
 local BLACK = Color3.fromRGB(0, 0, 0)
 
 local TagEffectProfiles = {
-	-- Ghoul
+	-- Ghoul (754232813)
 	[754232813] = {
 		Gradient1 = Color3.fromRGB(140, 0, 255),
 		Gradient2 = Color3.fromRGB(255, 255, 255),
@@ -272,33 +271,9 @@ local TagEffectProfiles = {
 		Effects = { "Pulse", "Scanline" },
 	},
 
-	-- XTCY vvv
+	-- XTCY IDs
 	[7452991350] = {
-	    Gradient1 = Color3.fromRGB(255, 0, 0),
-    	Gradient2 = Color3.fromRGB(255, 0, 0),
-    	Gradient3 = BLACK,
-    	SpinGradient = true,
-    	ScrollGradient = true,
-    	TopTextColor = YELLOW,
-    	BottomTextColor = YELLOW,
-    	Effects = { "Scanline", "Shimmer" },
-	},
-
-	-- XTCY Extavious
-	[7444930172] = {
-    	Gradient1 = Color3.fromRGB(255, 0, 0),
-    	Gradient2 = Color3.fromRGB(255, 0, 0),
-	    Gradient3 = BLACK,
-    	SpinGradient = true,
-    	ScrollGradient = true,
-    	TopTextColor = YELLOW,
-    	BottomTextColor = YELLOW,
-    	Effects = { "Scanline", "Shimmer" },
-	},
-
-	-- XTCY Wazz0ck_banned
-	[9072904295] = {
-    	Gradient1 = Color3.fromRGB(255, 0, 0),
+		Gradient1 = Color3.fromRGB(255, 0, 0),
 		Gradient2 = Color3.fromRGB(255, 0, 0),
 		Gradient3 = BLACK,
 		SpinGradient = true,
@@ -308,7 +283,29 @@ local TagEffectProfiles = {
 		Effects = { "Scanline", "Shimmer" },
 	},
 
-	-- Audio Sam (4689208231)
+	[7444930172] = {
+		Gradient1 = Color3.fromRGB(255, 0, 0),
+		Gradient2 = Color3.fromRGB(255, 0, 0),
+		Gradient3 = BLACK,
+		SpinGradient = true,
+		ScrollGradient = true,
+		TopTextColor = YELLOW,
+		BottomTextColor = YELLOW,
+		Effects = { "Scanline", "Shimmer" },
+	},
+
+	[9072904295] = {
+		Gradient1 = Color3.fromRGB(255, 0, 0),
+		Gradient2 = Color3.fromRGB(255, 0, 0),
+		Gradient3 = BLACK,
+		SpinGradient = true,
+		ScrollGradient = true,
+		TopTextColor = YELLOW,
+		BottomTextColor = YELLOW,
+		Effects = { "Scanline", "Shimmer" },
+	},
+
+	-- Audio Sam (9243834086)
 	[9243834086] = {
 		Gradient1 = SAM_BLUE,
 		Gradient2 = SAM_PURPLE,
@@ -332,7 +329,7 @@ local TagEffectProfiles = {
 		Effects = { "Scanline", "Shimmer" },
 	},
 
-	-- Shiroyasha (754232813): purple, white, black
+	-- Shiroyasha (4689208231)
 	[4689208231] = {
 		Gradient1 = Color3.fromRGB(255, 255, 255),
 		Gradient2 = Color3.fromRGB(0, 0, 0),
@@ -344,7 +341,7 @@ local TagEffectProfiles = {
 		Effects = { "Pulse", "Scanline" },
 	},
 
-	--CoOwner 
+	-- CoOwner main ID (2630250935)
 	[2630250935] = {
 		Gradient1 = Color3.fromRGB(255, 255, 255),
 		Gradient2 = Color3.fromRGB(125, 216, 215),
@@ -356,17 +353,36 @@ local TagEffectProfiles = {
 		Effects = { "Scanline", "Shimmer" },
 	},
 
-
-	-- Other current CustomTags IDs: yellow text
-	[8299334811] = { Preset = "SKY_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
-	[9072904295] = { Preset = "RED_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
-	[7444930172] = { Preset = "RED_SCROLL", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "Shimmer" } },
-
 	-- Owners explicit
-	[433636433] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
-	[196988708] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
-	[4926923208] = { Preset = "BLACK_SOLID", TopTextColor = YELLOW, BottomTextColor = Color3.fromRGB(235, 235, 235), Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" }, ScrollGradient = true },
+	[433636433] = {
+		Preset = "BLACK_SOLID",
+		TopTextColor = YELLOW,
+		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
+		ScrollGradient = true,
+	},
+	[196988708] = {
+		Preset = "BLACK_SOLID",
+		TopTextColor = YELLOW,
+		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
+		ScrollGradient = true,
+	},
+	[4926923208] = {
+		Preset = "BLACK_SOLID",
+		TopTextColor = YELLOW,
+		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
+		ScrollGradient = true,
+	},
 
+	-- Other current CustomTags IDs (no duplicates)
+	[8299334811] = {
+		Preset = "SKY_SCROLL",
+		TopTextColor = YELLOW,
+		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		Effects = { "Shimmer" },
+	},
 }
 
 --------------------------------------------------------------------
@@ -378,6 +394,13 @@ local RoleEffectPresets = {
 		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
 		TopTextColor = YELLOW,
 		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		ScrollGradient = true,
+	},
+	CoOwner = {
+		Preset = "WHITE_SOLID",
+		Effects = { "Scanline", "Shimmer" },
+		TopTextColor = Color3.fromRGB(20, 20, 22),
+		BottomTextColor = Color3.fromRGB(20, 20, 22),
 		ScrollGradient = true,
 	},
 	Sin = {
@@ -552,7 +575,8 @@ local function makeButton(parent, txt)
 end
 
 local function isOwner(plr)
-	return plr and ((OwnerNames[plr.Name] == true) or (OwnerUserIds[plr.UserId] == true))
+	if not plr then return false end
+	return (OwnerNames[plr.Name] == true) or (OwnerUserIds[plr.UserId] == true)
 end
 
 local function isCoOwner(plr)
@@ -606,8 +630,9 @@ local function trySendChat(text)
 
 	return false
 end
+
 --------------------------------------------------------------------
--- AVATAR WORTH HELPERS (FIXED + CACHED)
+-- AVATAR WORTH HELPERS (CACHED)
 --------------------------------------------------------------------
 local function parseAssetIdList(strValue, out)
 	if type(strValue) ~= "string" or strValue == "" then return end
@@ -822,7 +847,7 @@ local function ensureRefreshButton()
 	refreshBtn.Text = "Refresh"
 	refreshBtn.Font = Enum.Font.GothamBold
 	refreshBtn.TextSize = 14
-	refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255) -- forced white
+	refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 	refreshBtn.Parent = gui
 
 	makeCorner(refreshBtn, 12)
@@ -971,6 +996,7 @@ local function ensureSfxPanel()
 		end
 	end)
 end
+
 --------------------------------------------------------------------
 -- OWNER/COOWNER MENU (OPENS DOWN INTO THE SQUARE AREA)
 -- Includes SOS and AK buttons inside it
@@ -1015,13 +1041,10 @@ local function ensureTrailMenu()
 
 	if trailPanel and trailPanel.Parent then return end
 
-	-- This is the "square" area between the menu header and SFX panel in your screenshot.
-	-- We place the panel top so that when OPEN, it fills down toward SFX.
 	local PANEL_W, PANEL_H = 220, 320
 	local CLOSED_H = 36
 	local GAP = 10
 
-	-- SFX sits at Y = -64. Make our OPEN panel end just above SFX.
 	local bottomY = -64
 	local topY = bottomY - GAP - PANEL_H
 
@@ -1060,7 +1083,6 @@ local function ensureTrailMenu()
 	trailContent.Visible = false
 	trailContent.Parent = trailPanel
 
-	-- SOS / AK buttons inside menu (your request)
 	local topRow = Instance.new("Frame")
 	topRow.BackgroundTransparency = 1
 	topRow.Position = UDim2.new(0, 10, 0, 0)
@@ -1252,7 +1274,6 @@ local function ensureTrailMenu()
 		if trailTween then pcall(function() trailTween:Cancel() end) end
 
 		trailToggleBtn.Text = (isOwner(LocalPlayer) and "Owner Menu  " or "CoOwner Menu  ") .. (open and "^" or "v")
-
 		trailContent.Visible = open
 
 		trailTween = TweenService:Create(
@@ -1267,7 +1288,6 @@ local function ensureTrailMenu()
 		setOpen(not trailOpen)
 	end)
 
-	-- start OPEN so it matches your screenshot style
 	setOpen(true)
 end
 
@@ -1391,6 +1411,7 @@ local function ensureStatsPopup()
 		statsPopup.Visible = false
 	end)
 end
+
 --------------------------------------------------------------------
 -- TAG HELPERS
 --------------------------------------------------------------------
@@ -1408,6 +1429,10 @@ local function getSosRole(plr)
 
 	if isOwner(plr) then
 		return "Owner"
+	end
+
+	if isCoOwner(plr) then
+		return "CoOwner"
 	end
 
 	if CustomTags[plr.UserId] then
@@ -1451,6 +1476,13 @@ end
 
 local function getTopLine(plr, role)
 	if role == "Owner" then return "Owner" end
+	if role == "CoOwner" then
+		local prof = CustomTags[plr.UserId]
+		if prof and prof.TagText and #tostring(prof.TagText) > 0 then
+			return tostring(prof.TagText)
+		end
+		return "CoOwner"
+	end
 	if role == "Tester" then return "SOS Tester" end
 
 	if role == "Sin" then
@@ -1739,10 +1771,24 @@ local function buildGradientSequence(c1, c2, c3)
 end
 
 local function mergeEffects(a, b)
-	if type(b) == "table" then
-		return b
+	local out = {}
+	if type(a) == "table" then
+		for _, v in ipairs(a) do
+			out[#out + 1] = v
+		end
 	end
-	return a or {}
+	if type(b) == "table" then
+		for _, v in ipairs(b) do
+			local exists = false
+			for _, e in ipairs(out) do
+				if e == v then exists = true break end
+			end
+			if not exists then
+				out[#out + 1] = v
+			end
+		end
+	end
+	return out
 end
 
 local function resolveTagProfile(plr, role, roleColor)
@@ -1873,7 +1919,6 @@ local function applyTagEffects(plr, role, btn, baseGrad, stroke, topLabel, botto
 
 	local t = 0
 	local baseBtnSize = btn.Size
-	local baseBtnRot = btn.Rotation
 
 	local conn
 	conn = RunService.RenderStepped:Connect(function(dt)
@@ -1914,7 +1959,7 @@ local function applyTagEffects(plr, role, btn, baseGrad, stroke, topLabel, botto
 end
 
 --------------------------------------------------------------------
--- SPECIAL FX CORE (FIXED: MODE + COLOUR APPLY AGAIN)
+-- SPECIAL FX CORE
 --------------------------------------------------------------------
 local function disconnectFxConn(userId)
 	local c = FxConnByUserId[userId]
@@ -2116,7 +2161,7 @@ local function ensureSpecialFx(plr)
 end
 
 --------------------------------------------------------------------
--- ARRIVAL INTROS AND JOIN POPUP (UNCHANGED CORE)
+-- ARRIVAL INTROS AND JOIN POPUP
 --------------------------------------------------------------------
 local function playArrivalSound(parentGui, soundId, volume)
 	if not soundId or soundId == "" then return end
@@ -2219,27 +2264,17 @@ local function showJoinTpPopup(plr)
 	local tinf = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	local tout = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
-	local t1 = TweenService:Create(frame, tinf, { BackgroundTransparency = 0.15 })
-	local t2 = TweenService:Create(title, tinf, { TextTransparency = 0 })
-	local t3 = TweenService:Create(hint, tinf, { TextTransparency = 0 })
-	local t4 = TweenService:Create(tpBtn, tinf, { BackgroundTransparency = 0.18, TextTransparency = 0 })
-
-	t1:Play()
-	t2:Play()
-	t3:Play()
-	t4:Play()
+	TweenService:Create(frame, tinf, { BackgroundTransparency = 0.15 }):Play()
+	TweenService:Create(title, tinf, { TextTransparency = 0 }):Play()
+	TweenService:Create(hint, tinf, { TextTransparency = 0 }):Play()
+	TweenService:Create(tpBtn, tinf, { BackgroundTransparency = 0.18, TextTransparency = 0 }):Play()
 
 	task.delay(1.65, function()
 		if not frame or not frame.Parent then return end
-		local o1 = TweenService:Create(frame, tout, { BackgroundTransparency = 1 })
-		local o2 = TweenService:Create(title, tout, { TextTransparency = 1 })
-		local o3 = TweenService:Create(hint, tout, { TextTransparency = 1 })
-		local o4 = TweenService:Create(tpBtn, tout, { BackgroundTransparency = 1, TextTransparency = 1 })
-
-		o1:Play()
-		o2:Play()
-		o3:Play()
-		o4:Play()
+		TweenService:Create(frame, tout, { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(title, tout, { TextTransparency = 1 }):Play()
+		TweenService:Create(hint, tout, { TextTransparency = 1 }):Play()
+		TweenService:Create(tpBtn, tout, { BackgroundTransparency = 1, TextTransparency = 1 }):Play()
 
 		task.delay(0.25, function()
 			if frame and frame.Parent then frame:Destroy() end
@@ -2558,9 +2593,9 @@ end
 --------------------------------------------------------------------
 local function textHasAk(text)
 	if type(text) ~= "string" then return false end
+	-- Tightened a bit to reduce random triggers
 	if text == AK_MARKER_1 or text == AK_MARKER_2 then return true end
-	if text:find(AK_MARKER_1, 1, true) then return true end
-	if text:find(AK_MARKER_2, 1, true) then return true end
+	if text:sub(1, #AK_MARKER_1) == AK_MARKER_1 then return true end
 	return false
 end
 
@@ -2586,7 +2621,7 @@ local function onAkSeen(userId)
 end
 
 --------------------------------------------------------------------
--- COMMANDS (OWNER COOWNER ONLY) (FIXED: APPLY FX IMMEDIATELY)
+-- COMMANDS (OWNER COOWNER ONLY)
 --------------------------------------------------------------------
 local function applyCommandFrom(uid, text)
 	local plr = Players:GetPlayerByUserId(uid)
@@ -2805,6 +2840,7 @@ local function init()
 	end
 
 	-- If this breaks, blame the gremlins in the Roblox scheduler.
+	-- Also yes, the tag system is basically a tiny UI game of whack a mole.
 	print("SOS Tags loaded. Menu opens down into the square. Right click tags for stats.")
 end
 
