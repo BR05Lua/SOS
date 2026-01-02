@@ -272,7 +272,7 @@ local TagEffectProfiles = {
 	},
 
 	-- Audio Sam (4689208231)
-	[4689208231] = {
+	[1234] = {
 		Gradient1 = SAM_BLUE,
 		Gradient2 = SAM_PURPLE,
 		Gradient3 = SAM_BLACK,
@@ -293,6 +293,18 @@ local TagEffectProfiles = {
 		TopTextColor = YELLOW,
 		BottomTextColor = Color3.fromRGB(240, 240, 240),
 		Effects = { "Scanline", "Shimmer" },
+	},
+
+	-- Shiroyasha (754232813): purple, white, black
+	[4689208231] = {
+		Gradient1 = Color3.fromRGB(255, 255, 255),
+		Gradient2 = Color3.fromRGB(0, 0, 0),
+		Gradient3 = Color3.fromRGB(255, 255, 255),
+		SpinGradient = true,
+		ScrollGradient = false,
+		TopTextColor = YELLOW,
+		BottomTextColor = Color3.fromRGB(220, 220, 220),
+		Effects = { "Pulse", "Scanline" },
 	},
 
 	-- Other current CustomTags IDs: yellow text
