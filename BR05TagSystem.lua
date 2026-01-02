@@ -120,7 +120,8 @@ local OgProfiles = {
 	[9072904295] = { OgName = "XTCY" },
 	[7444930172] = { OgName = "XTCY" },
 	[754232813]  = { OgName = "Ghoul" },
-	[4689208231] = { OgName = "Audio Sam" },
+	[9243834086] = { OgName = "Audio Sam" },
+	[4689208231] = { OgName = "Shiroyasha" },
 	[2440542440] = { OgName = "Maze" },
 }
 
