@@ -126,9 +126,9 @@ local SinProfiles = {
 -- Can be: true OR { OgName = "Something", Color = Color3.fromRGB(...) }
 local OgProfiles = {
 	[8299334811] = { OgName = "Fake Cinny" },
-	[7452991350] = { OgName = "XTCY" },
-	[9072904295] = { OgName = "XTCY" },
-	[7444930172] = { OgName = "XTCY" },
+	[7452991350] = { OgName = "OG XTCY" },
+	[9072904295] = { OgName = "OG XTCY" },
+	[7444930172] = { OgName = "OG XTCY" },
 	[754232813]  = { OgName = "Ghoul" },
 	[9243834086] = { OgName = "Audio Sam" },
 	[4689208231] = { OgName = "Shiroyasha" },
@@ -270,13 +270,37 @@ local TagEffectProfiles = {
 		Effects = { "Pulse", "Scanline" },
 	},
 
-	-- XTCY (7452991350): red, dark red, red
+	-- XTCY vvv
 	[7452991350] = {
-		Gradient1 = RED,
-		Gradient2 = DARK_RED,
-		Gradient3 = RED,
-		SpinGradient = false,
-		ScrollGradient = true,
+		Gradient1 = Color3.fromRGB(255, 0, 0),
+		Gradient2 = Color3.fromRGB(255, 0, 0),
+		Gradient3 = Color3.fromRGB(0, 0, 0),
+		SpinGradient = true,
+		ScrollGradient = false,
+		TopTextColor = YELLOW,
+		BottomTextColor = YELLOW,
+		Effects = { "Scanline", "Shimmer" },
+	},
+
+	-- XTCY Extavious
+	[7444930172] = {
+		Gradient1 = Color3.fromRGB(255, 0, 0),
+		Gradient2 = Color3.fromRGB(255, 0, 0),
+		Gradient3 = Color3.fromRGB(0, 0, 0),
+		SpinGradient = true,
+		ScrollGradient = false,
+		TopTextColor = YELLOW,
+		BottomTextColor = YELLOW,
+		Effects = { "Scanline", "Shimmer" },
+	},
+
+	-- XTCY Wazz0ck_banned
+	[9072904295] = {
+		Gradient1 = Color3.fromRGB(255, 0, 0),
+		Gradient2 = Color3.fromRGB(255, 0, 0),
+		Gradient3 = Color3.fromRGB(0, 0, 0),
+		SpinGradient = true,
+		ScrollGradient = false,
 		TopTextColor = YELLOW,
 		BottomTextColor = YELLOW,
 		Effects = { "Scanline", "Shimmer" },
