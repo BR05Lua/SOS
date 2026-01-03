@@ -151,13 +151,14 @@ local OgProfiles = {
 local CustomTags = {
 	[2630250935] = { TagText = "Co-Owner" },
 	[8299334811] = { TagText = "Fake Cinny" },
-	[7452991350] = { TagText = "OG XTCY" },
-	[9072904295] = { TagText = "OG XTCY" },
-	[7444930172] = { TagText = "OG XTCY" },
+	[7452991350] = { TagText = "XTCY" },
+	[9072904295] = { TagText = "XTCY" },
+	[7444930172] = { TagText = "XTCY" },
 	[754232813]  = { TagText = "Ghoul" },
 	[9243834086] = { TagText = "Audio Sam" },
 	[4689208231] = { TagText = "Shiroyasha" },
 	[2440542440] = { TagText = "Maze" },
+	[4225432791] = { TagText = "Sir Pooki The Brit" },
 }
 
 --------------------------------------------------------------------
@@ -277,6 +278,7 @@ local AMBER = Color3.fromRGB(255, 190, 70)
 local BLACK = Color3.fromRGB(0, 0, 0)
 
 local TagEffectProfiles = {
+	
 	-- Ghoul (754232813)
 	[754232813] = {
 		Gradient1 = Color3.fromRGB(140, 0, 255),
@@ -379,6 +381,7 @@ local TagEffectProfiles = {
 		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
 		ScrollGradient = true,
 	},
+	
 	[196988708] = {
 		Preset = "BLACK_SOLID",
 		TopTextColor = YELLOW,
@@ -386,6 +389,7 @@ local TagEffectProfiles = {
 		Effects = { "OwnerGlitchBackdrop", "OwnerGlitchText", "RgbOutline", "Scanline", "Shimmer" },
 		ScrollGradient = true,
 	},
+	
 	[4926923208] = {
 		Preset = "BLACK_SOLID",
 		TopTextColor = YELLOW,
@@ -394,6 +398,18 @@ local TagEffectProfiles = {
 		ScrollGradient = true,
 	},
 
+	-- Pooki (2440542440)
+	[4225432791] = {
+		Gradient1 = RED,
+		Gradient2 = WHITE,
+		Gradient3 = BLUE,
+		SpinGradient = true,
+		ScrollGradient = true,
+		TopTextColor = YELLOW,
+		BottomTextColor = YELLOW,
+		Effects = { "Scanline", "Shimmer" },
+	},
+	
 }
 
 --------------------------------------------------------------------
