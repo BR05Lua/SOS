@@ -2867,15 +2867,16 @@ do
 	local DEFAULT_5 = 5 * 60
 	local DEFAULT_6 = 6 * 60
 
+	local TIMER_RED = Color3.fromRGB(255, 80, 80)
+	local TEXT_WHITE = Color3.fromRGB(245, 245, 245)
+	local TEXT_GREY = Color3.fromRGB(180, 180, 180)
+
 	local function waitForGuiAndRefresh()
 		local pg = LocalPlayer:WaitForChild("PlayerGui")
-		local gui = nil
-		local refresh = nil
-
 		while true do
-			gui = pg:FindFirstChild(GUI_NAME)
+			local gui = pg:FindFirstChild(GUI_NAME)
 			if gui then
-				refresh = gui:FindFirstChild(REFRESH_BUTTON_NAME)
+				local refresh = gui:FindFirstChild(REFRESH_BUTTON_NAME)
 				if refresh and refresh:IsA("TextButton") then
 					return gui, refresh
 				end
@@ -2928,7 +2929,7 @@ do
 		b.Text = txt or "Button"
 		b.Font = Enum.Font.GothamBold
 		b.TextSize = 14
-		b.TextColor3 = Color3.fromRGB(245, 245, 245)
+		b.TextColor3 = TEXT_WHITE
 		b.Parent = parent
 		makeCorner(b, 12)
 		makeStroke(b, 2, Color3.fromRGB(200, 40, 40), 0.15)
@@ -2984,10 +2985,11 @@ do
 	timePill.BackgroundTransparency = 0.18
 	timePill.Font = Enum.Font.GothamBold
 	timePill.TextSize = 14
-	timePill.TextColor3 = Color3.fromRGB(245, 245, 245)
+	timePill.TextColor3 = TEXT_WHITE
 	timePill.TextXAlignment = Enum.TextXAlignment.Center
 	timePill.TextYAlignment = Enum.TextYAlignment.Center
-	timePill.Text = "Time left: 00:00"
+	timePill.RichText = true
+	timePill.Text = "Time left: <font color=\"rgb(255,80,80)\">00:00</font>"
 	timePill.Parent = gui
 	makeCorner(timePill, 12)
 	makeStroke(timePill, 2, Color3.fromRGB(200, 40, 40), 0.15)
@@ -3014,13 +3016,13 @@ do
 	vcbMini.Position = UDim2.new(0, 5, 1, -16)
 	vcbMini.Font = Enum.Font.GothamBold
 	vcbMini.TextSize = 12
-	vcbMini.TextColor3 = Color3.fromRGB(255, 80, 80)
+	vcbMini.TextColor3 = TIMER_RED
 	vcbMini.TextXAlignment = Enum.TextXAlignment.Right
 	vcbMini.Text = ""
 	vcbMini.Visible = false
 	vcbMini.Parent = vcbBtn
 
-	-- Panel (menu below top row)
+	-- Panel
 	local panel = Instance.new("Frame")
 	panel.Name = "VCB_TimerPanel"
 	panel.AnchorPoint = Vector2.new(1, 0)
@@ -3050,7 +3052,7 @@ do
 	title.Font = Enum.Font.GothamBold
 	title.TextSize = 16
 	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextColor3 = Color3.fromRGB(245, 245, 245)
+	title.TextColor3 = TEXT_WHITE
 	title.Text = "VCB Timer"
 	title.Parent = header
 
@@ -3064,7 +3066,7 @@ do
 	closeBtn.Text = "Close"
 	closeBtn.Font = Enum.Font.GothamBold
 	closeBtn.TextSize = 14
-	closeBtn.TextColor3 = Color3.fromRGB(255, 110, 110)
+	closeBtn.TextColor3 = TEXT_WHITE
 	closeBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
 	closeBtn.BackgroundTransparency = 0.20
 	closeBtn.Parent = header
@@ -3078,7 +3080,7 @@ do
 	bigTime.Font = Enum.Font.GothamBlack
 	bigTime.TextSize = 40
 	bigTime.TextXAlignment = Enum.TextXAlignment.Left
-	bigTime.TextColor3 = Color3.fromRGB(245, 245, 245)
+	bigTime.TextColor3 = TIMER_RED
 	bigTime.Text = "00:00"
 	bigTime.Parent = panel
 
@@ -3089,11 +3091,11 @@ do
 	status.Font = Enum.Font.Gotham
 	status.TextSize = 14
 	status.TextXAlignment = Enum.TextXAlignment.Left
-	status.TextColor3 = Color3.fromRGB(180, 180, 180)
+	status.TextColor3 = TEXT_GREY
 	status.Text = "Press Start when you get VCB."
 	status.Parent = panel
 
-	-- Stop above Pause (right side controls)
+	-- Stop above Pause
 	local rightControls = Instance.new("Frame")
 	rightControls.BackgroundTransparency = 1
 	rightControls.AnchorPoint = Vector2.new(1, 0)
@@ -3110,7 +3112,7 @@ do
 	stopBtn.Text = "Stop"
 	stopBtn.Font = Enum.Font.GothamBold
 	stopBtn.TextSize = 14
-	stopBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+	stopBtn.TextColor3 = TEXT_WHITE
 	stopBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
 	stopBtn.BackgroundTransparency = 0.20
 	stopBtn.Parent = rightControls
@@ -3126,14 +3128,14 @@ do
 	pauseBtn.Text = "Pause"
 	pauseBtn.Font = Enum.Font.GothamBold
 	pauseBtn.TextSize = 14
-	pauseBtn.TextColor3 = Color3.fromRGB(245, 245, 245)
+	pauseBtn.TextColor3 = TEXT_WHITE
 	pauseBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
 	pauseBtn.BackgroundTransparency = 0.20
 	pauseBtn.Parent = rightControls
 	makeCorner(pauseBtn, 12)
 	makeStroke(pauseBtn, 1, Color3.fromRGB(200, 40, 40), 0.25)
 
-	-- Bottom row buttons (equal widths)
+	-- Bottom row equal sizing
 	local bottomRow = Instance.new("Frame")
 	bottomRow.BackgroundTransparency = 1
 	bottomRow.Position = UDim2.new(0, 18, 1, -62)
@@ -3153,7 +3155,7 @@ do
 		b.Text = text
 		b.Font = Enum.Font.GothamBold
 		b.TextSize = 14
-		b.TextColor3 = Color3.fromRGB(255, 110, 110)
+		b.TextColor3 = TEXT_WHITE
 		b.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
 		b.BackgroundTransparency = 0.20
 		b.Parent = bottomRow
@@ -3175,14 +3177,11 @@ do
 	local function updateUi()
 		local mmss = formatMMSS(remaining)
 		bigTime.Text = mmss
-		timePill.Text = "Time left: " .. mmss
+		timePill.Text = "Time left: <font color=\"rgb(255,80,80)\">" .. mmss .. "</font>"
 
 		local menuOpen = panel.Visible
 		vcbMini.Visible = (not menuOpen) and ((running or paused) and remaining > 0)
 		vcbMini.Text = vcbMini.Visible and mmss or ""
-
-		-- Tiny joke so the script does not get lonely.
-		-- If this breaks, blame someone on the other team with a shotgun and a dream.
 	end
 
 	local function safeRejoinSameServer()
@@ -3216,8 +3215,8 @@ do
 
 	local function pauseTimer()
 		if not running then
-			status.Text = "Paused. Timer will not rejoin you."
 			paused = true
+			status.Text = "Paused. Timer will not rejoin you."
 			updateUi()
 			return
 		end
@@ -3254,14 +3253,13 @@ do
 		updateUi()
 	end
 
-	-- Fit top buttons and panel under Refresh like your screenshot
+	-- Layout beside Refresh and keep on screen
 	local function layoutTop()
 		if not refreshBtn or not refreshBtn.Parent then return end
 
 		local yScale = refreshBtn.Position.Y.Scale
 		local yOffset = refreshBtn.Position.Y.Offset
 
-		-- Shrink time pill if the screen is narrow so text stays on screen
 		local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
 		local totalNeeded = (refreshBtn.Size.X.Offset + GAP + TIME_W + GAP + VCB_W) + 40
 		local timeW = TIME_W
@@ -3271,17 +3269,12 @@ do
 
 		timePill.Size = UDim2.new(0, timeW, 0, BTN_H)
 
-		-- Keep Refresh where it already is, align VCB and time pill to its left
-		timePill.AnchorPoint = Vector2.new(1, 0)
 		timePill.Position = UDim2.new(1, refreshBtn.Position.X.Offset - (refreshBtn.Size.X.Offset + GAP), yScale, yOffset)
-
 		vcbBtn.Position = UDim2.new(1, refreshBtn.Position.X.Offset - (refreshBtn.Size.X.Offset + GAP + timeW + GAP), yScale, yOffset)
 
-		-- Panel below the top row, right aligned with Refresh
 		local panelY = yOffset + BTN_H + 10
 		panel.Position = UDim2.new(1, refreshBtn.Position.X.Offset, yScale, panelY)
 
-		-- Clamp panel size so it never goes off screen
 		local maxW = math.max(340, viewport.X - 20)
 		sizeConstraint.MaxSize = Vector2.new(math.min(PANEL_W, maxW), PANEL_H)
 
@@ -3293,7 +3286,6 @@ do
 		workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(layoutTop)
 	end
 
-	-- Bottom row equal sizing whenever the row changes size
 	local function resizeRowButtons()
 		local w = bottomRow.AbsoluteSize.X
 		local each = math.floor((w - (rowLayout.Padding.Offset * 2)) / 3)
@@ -3304,7 +3296,6 @@ do
 	bottomRow:GetPropertyChangedSignal("AbsoluteSize"):Connect(resizeRowButtons)
 	task.defer(resizeRowButtons)
 
-	-- Panel open/close
 	local function setPanelOpen(open)
 		panel.Visible = open and true or false
 		updateUi()
@@ -3314,16 +3305,11 @@ do
 		setPanelOpen(false)
 	end)
 
-	-- VCB button behaviour
+	-- IMPORTANT: VCB button does NOT start the timer anymore, it only opens/closes the menu
 	vcbBtn.MouseButton1Click:Connect(function()
-		-- If no timer active, pressing VCB starts 5:00 (the whole point)
-		if (not running) and (remaining <= 0) then
-			startTimer(DEFAULT_5)
-		end
 		setPanelOpen(not panel.Visible)
 	end)
 
-	-- Panel buttons
 	start5Btn.MouseButton1Click:Connect(function()
 		startTimer(DEFAULT_5)
 	end)
@@ -3344,13 +3330,10 @@ do
 		stopTimer()
 	end)
 
-	-- Chat triggers (only you)
+	-- Chat triggers only you
 	LocalPlayer.Chatted:Connect(function(message)
 		if chatHasVCB(message) then
-			if (not running) and (remaining <= 0) then
-				startTimer(DEFAULT_5)
-			end
-			updateUi()
+			startTimer(DEFAULT_5)
 		end
 	end)
 
@@ -3360,15 +3343,11 @@ do
 			if not msg.TextSource then return end
 			if msg.TextSource.UserId ~= LocalPlayer.UserId then return end
 			if chatHasVCB(msg.Text or "") then
-				if (not running) and (remaining <= 0) then
-					startTimer(DEFAULT_5)
-				end
-				updateUi()
+				startTimer(DEFAULT_5)
 			end
 		end)
 	end
 
-	-- Main tick
 	RunService.RenderStepped:Connect(function()
 		if running then
 			local left = endAt - os.clock()
@@ -3377,7 +3356,6 @@ do
 				running = false
 				updateUi()
 
-				-- If you did not Pause or Stop it, you are getting yoinked back into the same server.
 				if not paused then
 					status.Text = "Time up. Rejoining..."
 					updateUi()
@@ -3392,6 +3370,5 @@ do
 		end
 	end)
 
-	-- Start hidden
 	updateUi()
 end
