@@ -1,7 +1,7 @@
 local urls = {
     "https://raw.githubusercontent.com/BR05Lua/SOS/refs/heads/main/BR05TagSystem.lua",
     "https://raw.githubusercontent.com/BR05Lua/SOS/refs/heads/main/SOSMenu.lua",
-    "https://raw.githubusercontent.com/user/script3.lua"
+    "https://raw.githubusercontent.com/BR05Lua/SOS/refs/heads/main/Security/BR05"
 }
 
 for _, url in ipairs(urls) do
