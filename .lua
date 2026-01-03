@@ -2093,61 +2093,100 @@ local function createUI()
 		end)
 	end
 
-	----------------------------------------------------------------
-	-- CONTROLS TAB
-	----------------------------------------------------------------
-	do
-		local header = makeText(controlsScroll, "Controls", 16, true)
-		header.Size = UDim2.new(1, 0, 0, 22)
+----------------------------------------------------------------
+-- CONTROLS TAB
+----------------------------------------------------------------
+do
+	local header = makeText(controlsScroll, "Controls", 16, true)
+	header.Size = UDim2.new(1, 0, 0, 22)
 
-		local info = makeText(controlsScroll,
-			"PC:\n- Fly Toggle: " .. flightToggleKey.Name .. "\n- Move: WASD + Q/E\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu",
-			14, false
-		)
-		info.Size = UDim2.new(1, 0, 0, 130)
+	local flyName = (flightToggleKey and flightToggleKey.Name) or "UNBOUND"
 
-		local bindRow = Instance.new("Frame")
-		bindRow.BackgroundTransparency = 1
-		bindRow.Size = UDim2.new(1, 0, 0, 74)
-		bindRow.Parent = controlsScroll
+	local info = makeText(controlsScroll,
+		"PC:\n- Fly Toggle: " .. flyName .. "\n- Move: WASD + Q/E\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu",
+		14, false
+	)
+	info.Size = UDim2.new(1, 0, 0, 130)
 
-		local function makeBindLine(labelText, getKeyFn, setKeyFn)
-			local line = Instance.new("Frame")
-			line.BackgroundTransparency = 1
-			line.Size = UDim2.new(1, 0, 0, 32)
-			line.Parent = bindRow
+	local bindRow = Instance.new("Frame")
+	bindRow.BackgroundTransparency = 1
+	bindRow.Size = UDim2.new(1, 0, 0, 74)
+	bindRow.Parent = controlsScroll
 
-			local l = makeText(line, labelText, 14, true)
-			l.Size = UDim2.new(0, 170, 1, 0)
+	local function makeBindLine(labelText, getKeyFn, setKeyFn, allowUnbind)
+		local line = Instance.new("Frame")
+		line.BackgroundTransparency = 1
+		line.Size = UDim2.new(1, 0, 0, 32)
+		line.Parent = bindRow
 
-			local btn = makeButton(line, getKeyFn().Name)
-			btn.Size = UDim2.new(0, 110, 0, 30)
-			btn.Position = UDim2.new(0, 180, 0, 1)
+		local l = makeText(line, labelText, 14, true)
+		l.Size = UDim2.new(0, 170, 1, 0)
 
-			local hint = makeText(line, "Click then press a key", 12, false)
-			hint.Size = UDim2.new(1, -300, 1, 0)
-			hint.Position = UDim2.new(0, 300, 0, 0)
-			hint.TextColor3 = Color3.fromRGB(190, 190, 190)
+		local function keyName()
+			local k = getKeyFn()
+			return (k and k.Name) or "UNBOUND"
+		end
 
-			local waiting = false
-			btn.MouseButton1Click:Connect(function()
-				waiting = true
-				btn.Text = "..."
-			end)
+		local btn = makeButton(line, keyName())
+		btn.Size = UDim2.new(0, 110, 0, 30)
+		btn.Position = UDim2.new(0, 180, 0, 1)
 
-			UserInputService.InputBegan:Connect(function(input, gp)
-				if gp then return end
-				if not waiting then return end
-				if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		local unbindBtn = nil
+		if allowUnbind then
+			unbindBtn = makeButton(line, "Unbind")
+			unbindBtn.Size = UDim2.new(0, 90, 0, 30)
+			unbindBtn.Position = UDim2.new(0, 296, 0, 1)
+		end
+
+		local hint = makeText(line, "Click then press a key", 12, false)
+		hint.Size = UDim2.new(1, -410, 1, 0)
+		hint.Position = UDim2.new(0, 395, 0, 0)
+		hint.TextColor3 = Color3.fromRGB(190, 190, 190)
+
+		local waiting = false
+		btn.MouseButton1Click:Connect(function()
+			waiting = true
+			btn.Text = "..."
+		end)
+
+		if unbindBtn then
+			unbindBtn.MouseButton1Click:Connect(function()
 				waiting = false
-				setKeyFn(input.KeyCode)
-				btn.Text = getKeyFn().Name
+				setKeyFn(nil)
+				btn.Text = keyName()
+
+				local fly = keyName()
+				info.Text =
+					"PC:\n- Fly Toggle: " .. fly .. "\n- Move: WASD + Q/E\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu"
+
 				scheduleSave()
 			end)
 		end
 
-		makeBindLine("Flight Toggle Key:", function() return flightToggleKey end, function(k) flightToggleKey = k end)
+		UserInputService.InputBegan:Connect(function(input, gp)
+			if gp then return end
+			if not waiting then return end
+			if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+			waiting = false
+			setKeyFn(input.KeyCode)
+			btn.Text = keyName()
+
+			local fly = keyName()
+			info.Text =
+				"PC:\n- Fly Toggle: " .. fly .. "\n- Move: WASD + Q/E\n\nMobile:\n- Use the Fly button (bottom-right)\n- Use the top arrow to open/close the menu"
+
+			scheduleSave()
+		end)
 	end
+
+	makeBindLine(
+		"Flight Toggle Key:",
+		function() return flightToggleKey end,
+		function(k) flightToggleKey = k end,
+		true
+	)
+end
+
 
 	----------------------------------------------------------------
 	-- FLY TAB
