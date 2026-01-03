@@ -1,6 +1,24 @@
 -- SOS TAGS Standalone LocalScript
 -- Put in StarterPlayerScripts
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
+-- If this is UI/tag stuff, it should be client-only
+if RunService:IsServer() then
+    return
+end
+
+local player = Players.LocalPlayer
+if not player then
+    return
+end
+
+-- Hard "init once" lock that survives duplicate loads
+local LOCK_ATTR = "SOS_TagSystem_Initialized"
+if player:GetAttribute(LOCK_ATTR) then
+    return
+end
+player:SetAttribute(LOCK_ATTR, true)
 --------------------------------------------------------------------
 -- SERVICES
 --------------------------------------------------------------------
