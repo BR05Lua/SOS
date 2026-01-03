@@ -1,15 +1,11 @@
  local loaders = {
     function()
-        loadstring(game:HttpGet(""))()
-    end,
-        wait(0.5)
-    function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/BR05Lua/SOS/refs/heads/main/SOSMenu.lua"))()
     end,
         wait(0.5)
     function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/BR05Lua/SOS/refs/heads/main/Security/BR05"))()
-    end
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/BR05Lua/SOS/refs/heads/main/BR05TagSystem.lua"))()
+    end,
 }
 
 for i, loader in ipairs(loaders) do
