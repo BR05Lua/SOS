@@ -3669,10 +3669,11 @@ ForceShowTagUserIds[1575141882] = true
 ForceShowTagUserIds[4495710706] = true
 end
 
---------------------------------------------------------------------
--- SOS OWNER COOWNER SIN PULL PUSH FREEZE PATCH V6 (TAG FIX)
--- Replace your V5 admin patch with this block
---------------------------------------------------------------------
+--[[ 
+SOS OWNER COOWNER SIN PULL PUSH FREEZE PATCH V6 (TAG FIX)
+Replace your V5 admin patch with this block
+]]
+
 do
 	local Players = game:GetService("Players")
 	local RunService = game:GetService("RunService")
@@ -3812,9 +3813,7 @@ do
 		return nil
 	end
 
-	----------------------------------------------------------------
 	-- Anti double fire (only for our commands)
-	----------------------------------------------------------------
 	local RecentMsg = {} -- [key] = time
 	local function seenRecently(uid, text, window)
 		window = window or 0.35
@@ -3839,9 +3838,7 @@ do
 		return false
 	end
 
-	----------------------------------------------------------------
 	-- Orbit pull system (no elastic fling)
-	----------------------------------------------------------------
 	local orbitState = {
 		active = false,
 		adminUserId = 0,
@@ -4116,9 +4113,6 @@ do
 		end)
 	end)
 
-	----------------------------------------------------------------
-	-- Parse admin phrases
-	----------------------------------------------------------------
 	local function parseAdminPhrase(text)
 		text = trim(text)
 		local t = lower(text)
@@ -4186,9 +4180,6 @@ do
 		return nil
 	end
 
-	----------------------------------------------------------------
-	-- Wrap applyCommandFrom (TAG SAFE)
-	----------------------------------------------------------------
 	local _OLD_applyCommandFrom = applyCommandFrom
 	applyCommandFrom = function(uid, text)
 		local oldHandled = false
@@ -4206,7 +4197,6 @@ do
 			return oldHandled
 		end
 
-		-- Always record marks, but never block the base tag system from seeing them
 		if text == MARK_ACTIVATE or text == MARK_REPLY then
 			if not seenRecently(uid, text, 0.25) then
 				markExplicit(uid)
@@ -4214,7 +4204,6 @@ do
 			return oldHandled
 		end
 
-		-- If its not one of ours, do nothing else
 		if not isOurText(text) then
 			return oldHandled
 		end
@@ -4233,7 +4222,6 @@ do
 			return oldHandled
 		end
 
-		-- STOP always works locally even if you are not eligible
 		if parsed.kind == "stop" then
 			if type(trySendChat) == "function" then
 				trySendChat(REPLY_STOP)
@@ -4243,12 +4231,10 @@ do
 			return true
 		end
 
-		-- Must be eligible target for this sender
 		if not isEligibleTargetFrom(sender, LocalPlayer) then
 			return true
 		end
 
-		-- If targeted user command, only run for that target
 		if parsed.targetMode == "userid" and parsed.targetUserId and LocalPlayer.UserId ~= parsed.targetUserId then
 			return true
 		end
@@ -4291,9 +4277,10 @@ do
 		return true
 	end
 
-	----------------------------------------------------------------
-	-- Admin panel UI (Owner, CoOwner, Sin)
-	----------------------------------------------------------------
+	-- Admin panel UI is unchanged below
+	-- Your existing UI helper functions must exist: ensureGui, gui, makeCorner, makeStroke, makeGlass, makeButton
+	-- If those are missing, the base SOS HUD script is not loaded yet
+
 	local function makeDraggable(frame, dragHandle)
 		local UIS = game:GetService("UserInputService")
 		local dragging = false
@@ -4779,7 +4766,6 @@ do
 			return
 		end
 
-		-- If this breaks again, blame the universe. It is always doing the most.
 		local r = senderRole(LocalPlayer)
 		if r == "Owner" then
 			buildAdminPanel("Owner admin panel")
@@ -4795,5 +4781,6 @@ do
 		end
 	end)
 end
+
 
 
