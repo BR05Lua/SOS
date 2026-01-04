@@ -93,7 +93,7 @@ local CustomUserIntros = {
 	},
 	[105995794] = {
 		Text = "! Asralian Wendigo is Here !",
-		SoundId = "rbxassetid://7018424260",
+		SoundId = "rbxassetid://76959581837478",
 		TextColor = Color3.fromRGB(200, 0, 0),
 	},
 }
