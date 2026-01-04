@@ -3670,8 +3670,8 @@ ForceShowTagUserIds[4495710706] = true
 end
 
 --------------------------------------------------------------------
--- SOS OWNER COOWNER SIN PULL PUSH FREEZE PATCH V5 (PERMISSIONS UPDATE)
--- Replace your V4 admin patch with this block
+-- SOS OWNER COOWNER SIN PULL PUSH FREEZE PATCH V6 (TAG FIX)
+-- Replace your V5 admin patch with this block
 --------------------------------------------------------------------
 do
 	local Players = game:GetService("Players")
@@ -3702,14 +3702,9 @@ do
 		return ExplicitMarked[userId] == true
 	end
 
-	local function isTesterRole(plr)
-		if not plr then return false end
-		return getSosRole(plr) == "Tester"
-	end
-
 	local function isSinRole(plr)
 		if not plr then return false end
-		if getSosRole(plr) == "Sin" then return true end
+		if type(getSosRole) == "function" and getSosRole(plr) == "Sin" then return true end
 		if type(SinProfiles) == "table" and SinProfiles[plr.UserId] ~= nil then return true end
 		return false
 	end
@@ -3734,14 +3729,32 @@ do
 		return (r == "Owner") or (r == "CoOwner") or (r == "Sin")
 	end
 
-	local function hasSosBillboard(plr)
-		if not plr or not plr.Character then return false end
-		return plr.Character:FindFirstChild("SOS_RoleTag") ~= nil
+	local function lower(s)
+		return string.lower(tostring(s or ""))
 	end
 
-	-- Permission rule update:
-	-- Owner/CoOwner can affect everyone (including sins).
-	-- Sins can affect everyone EXCEPT owners, coowners, and other sins.
+	local function hasSosBillboard(plr)
+		if not plr or not plr.Character then return false end
+		local char = plr.Character
+
+		if char:FindFirstChild("SOS_RoleTag") then return true end
+		if char:FindFirstChild("SOS_Tag") then return true end
+
+		for _, d in ipairs(char:GetDescendants()) do
+			if d:IsA("BillboardGui") then
+				local n = lower(d.Name)
+				if string.find(n, "sos", 1, true) and (string.find(n, "tag", 1, true) or string.find(n, "role", 1, true)) then
+					return true
+				end
+			end
+		end
+
+		return false
+	end
+
+	-- Permission rule:
+	-- Owner/CoOwner can affect everyone (including sins)
+	-- Sins can affect everyone except owners, coowners, other sins
 	local function canSenderAffectTarget(senderPlr, targetPlr)
 		if not senderPlr or not targetPlr then return false end
 		if senderPlr.UserId == targetPlr.UserId then return false end
@@ -3761,7 +3774,6 @@ do
 		return false
 	end
 
-	-- Eligibility rule used by "all" broadcasts and UI lists
 	local function isEligibleTargetFrom(senderPlr, targetPlr)
 		if not senderPlr or not targetPlr then return false end
 		if not canSenderAffectTarget(senderPlr, targetPlr) then return false end
@@ -3783,10 +3795,6 @@ do
 		return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 	end
 
-	local function lower(s)
-		return string.lower(tostring(s or ""))
-	end
-
 	local function findPlayerByNameLoose(name)
 		name = trim(name)
 		if name == "" then return nil end
@@ -3805,7 +3813,7 @@ do
 	end
 
 	----------------------------------------------------------------
-	-- Anti double fire
+	-- Anti double fire (only for our commands)
 	----------------------------------------------------------------
 	local RecentMsg = {} -- [key] = time
 	local function seenRecently(uid, text, window)
@@ -3817,6 +3825,17 @@ do
 		if t and (now - t) < window then
 			return true
 		end
+		return false
+	end
+
+	local function isOurText(text)
+		if text == MARK_ACTIVATE or text == MARK_REPLY then return true end
+		local t = lower(trim(text))
+		if t == "stop" then return true end
+		if t:sub(1, 6) == "freeze" then return true end
+		if t:sub(1, 8) == "unfreeze" then return true end
+		if t:sub(1, 9) == "imma pull" then return true end
+		if t:sub(1, 9) == "imma push" then return true end
 		return false
 	end
 
@@ -3980,7 +3999,6 @@ do
 	local function startOrbitPull(adminUserId, pullSpeed)
 		local sender = Players:GetPlayerByUserId(adminUserId)
 		if not sender then return end
-
 		if not isEligibleTargetFrom(sender, LocalPlayer) then return end
 
 		orbitState.active = true
@@ -4044,7 +4062,6 @@ do
 	local function doPushBurstFrom(adminUserId, pushPower)
 		local sender = Players:GetPlayerByUserId(adminUserId)
 		if not sender then return end
-
 		if not isEligibleTargetFrom(sender, LocalPlayer) then return end
 
 		stopAllLocal()
@@ -4170,39 +4187,57 @@ do
 	end
 
 	----------------------------------------------------------------
-	-- Wrap applyCommandFrom without touching your base logic
+	-- Wrap applyCommandFrom (TAG SAFE)
 	----------------------------------------------------------------
 	local _OLD_applyCommandFrom = applyCommandFrom
 	applyCommandFrom = function(uid, text)
-		if _OLD_applyCommandFrom and _OLD_applyCommandFrom(uid, text) then
-			return true
+		local oldHandled = false
+
+		if _OLD_applyCommandFrom then
+			local ok, res = pcall(function()
+				return _OLD_applyCommandFrom(uid, text)
+			end)
+			if ok and res == true then
+				oldHandled = true
+			end
 		end
 
-		if typeof(uid) ~= "number" then return false end
-		if type(text) ~= "string" then return false end
+		if typeof(uid) ~= "number" or type(text) ~= "string" then
+			return oldHandled
+		end
+
+		-- Always record marks, but never block the base tag system from seeing them
+		if text == MARK_ACTIVATE or text == MARK_REPLY then
+			if not seenRecently(uid, text, 0.25) then
+				markExplicit(uid)
+			end
+			return oldHandled
+		end
+
+		-- If its not one of ours, do nothing else
+		if not isOurText(text) then
+			return oldHandled
+		end
 
 		if seenRecently(uid, text, 0.35) then
-			return false
-		end
-
-		if text == MARK_ACTIVATE or text == MARK_REPLY then
-			markExplicit(uid)
-			return false
+			return oldHandled
 		end
 
 		local sender = Players:GetPlayerByUserId(uid)
 		if not isAdminSender(sender) then
-			return false
+			return oldHandled
 		end
 
 		local parsed = parseAdminPhrase(text)
 		if not parsed then
-			return false
+			return oldHandled
 		end
 
 		-- STOP always works locally even if you are not eligible
 		if parsed.kind == "stop" then
-			trySendChat(REPLY_STOP)
+			if type(trySendChat) == "function" then
+				trySendChat(REPLY_STOP)
+			end
 			stopAllLocal()
 			doFreezeOffLocal()
 			return true
@@ -4222,25 +4257,33 @@ do
 		local pushPower = clampInt(parsed.pushPower, 1, 100, 60)
 
 		if parsed.kind == "pull" then
-			trySendChat(REPLY_PULL)
+			if type(trySendChat) == "function" then
+				trySendChat(REPLY_PULL)
+			end
 			startOrbitPull(uid, pullSpeed)
 			return true
 		end
 
 		if parsed.kind == "push" then
-			trySendChat(REPLY_PUSH)
+			if type(trySendChat) == "function" then
+				trySendChat(REPLY_PUSH)
+			end
 			doPushBurstFrom(uid, pushPower)
 			return true
 		end
 
 		if parsed.kind == "freezeon" then
-			trySendChat(REPLY_FROZEN)
+			if type(trySendChat) == "function" then
+				trySendChat(REPLY_FROZEN)
+			end
 			doFreezeOnLocal()
 			return true
 		end
 
 		if parsed.kind == "freezeoff" then
-			trySendChat(REPLY_FROZEN)
+			if type(trySendChat) == "function" then
+				trySendChat(REPLY_FROZEN)
+			end
 			doFreezeOffLocal()
 			return true
 		end
@@ -4736,6 +4779,7 @@ do
 			return
 		end
 
+		-- If this breaks again, blame the universe. It is always doing the most.
 		local r = senderRole(LocalPlayer)
 		if r == "Owner" then
 			buildAdminPanel("Owner admin panel")
@@ -4752,325 +4796,4 @@ do
 	end)
 end
 
---------------------------------------------------------------------
--- SPECIAL PUSH MENU
--- Only shows for UserId 754232813
--- Only if UserId 4689208231 is in the game
--- Push only targets that person
---------------------------------------------------------------------
-do
-	local Players = game:GetService("Players")
-	local UserInputService = game:GetService("UserInputService")
-
-	local LocalPlayer = Players.LocalPlayer
-	if not LocalPlayer then return end
-
-	local CONTROLLER_USERID = 754232813
-	local TARGET_USERID = 4689208231
-
-	if LocalPlayer.UserId ~= CONTROLLER_USERID then
-		return
-	end
-
-	local function getTargetPlayer()
-		return Players:GetPlayerByUserId(TARGET_USERID)
-	end
-
-	local function canSend()
-		return type(trySendChat) == "function"
-	end
-
-	local function clampInt(n, a, b, fallback)
-		n = tonumber(n)
-		if not n then return fallback end
-		n = math.floor(n + 0.5)
-		if n < a then n = a end
-		if n > b then n = b end
-		return n
-	end
-
-	local function ensureGuiExists()
-		if type(ensureGui) == "function" then
-			return ensureGui()
-		end
-		local pg = LocalPlayer:FindFirstChild("PlayerGui")
-		if not pg then
-			pg = LocalPlayer:WaitForChild("PlayerGui", 5)
-		end
-		return pg
-	end
-
-	local function makeCorner(parent, r)
-		local c = Instance.new("UICorner")
-		c.CornerRadius = UDim.new(0, r or 12)
-		c.Parent = parent
-		return c
-	end
-
-	local function makeStroke(parent, thickness, color, transparency)
-		local s = Instance.new("UIStroke")
-		s.Color = color or Color3.fromRGB(0, 0, 0)
-		s.Thickness = thickness or 2
-		s.Transparency = transparency or 0.25
-		s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		s.Parent = parent
-		return s
-	end
-
-	local function makeGlass(parent)
-		parent.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-		parent.BackgroundTransparency = 0.18
-
-		local grad = Instance.new("UIGradient")
-		grad.Rotation = 90
-		grad.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 22)),
-			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(10, 10, 12)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 6, 8)),
-		})
-		grad.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.05),
-			NumberSequenceKeypoint.new(1, 0.20),
-		})
-		grad.Parent = parent
-	end
-
-	local function makeButton(parent, txt)
-		local b = Instance.new("TextButton")
-		b.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-		b.BackgroundTransparency = 0.2
-		b.BorderSizePixel = 0
-		b.AutoButtonColor = true
-		b.Text = txt or "Button"
-		b.Font = Enum.Font.GothamBold
-		b.TextSize = 13
-		b.TextColor3 = Color3.fromRGB(245, 245, 245)
-		b.Parent = parent
-		makeCorner(b, 10)
-
-		local st = Instance.new("UIStroke")
-		st.Color = Color3.fromRGB(200, 40, 40)
-		st.Thickness = 1
-		st.Transparency = 0.25
-		st.Parent = b
-
-		return b
-	end
-
-	local function makeDraggable(frame, handle)
-		handle = handle or frame
-		local dragging = false
-		local dragStart = nil
-		local startPos = nil
-
-		handle.InputBegan:Connect(function(input)
-			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
-				return
-			end
-			dragging = true
-			dragStart = input.Position
-			startPos = frame.Position
-
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
-		end)
-
-		UserInputService.InputChanged:Connect(function(input)
-			if not dragging then return end
-			if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
-				return
-			end
-			local delta = input.Position - dragStart
-			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		end)
-	end
-
-	local panelGui
-	local panel
-	local powerBox
-	local pushBtn
-	local statusLbl
-
-	local function destroyPanel()
-		if panel and panel.Parent then
-			panel:Destroy()
-		end
-		panel = nil
-		powerBox = nil
-		pushBtn = nil
-		statusLbl = nil
-	end
-
-	local function ensurePanel()
-		local target = getTargetPlayer()
-		if not target then
-			destroyPanel()
-			return
-		end
-
-		panelGui = ensureGuiExists()
-		if not panelGui then return end
-
-		if panel and panel.Parent then
-			return
-		end
-
-		panel = Instance.new("Frame")
-		panel.Name = "SOS_SpecialPushMenu_754232813"
-		panel.Size = UDim2.new(0, 320, 0, 150)
-		panel.Position = UDim2.new(0, 18, 0, 300)
-		panel.BorderSizePixel = 0
-		panel.ZIndex = 9400
-		panel.Parent = panelGui
-		makeCorner(panel, 16)
-		makeGlass(panel)
-		makeStroke(panel, 2, Color3.fromRGB(200, 40, 40), 0.12)
-
-		local pad = Instance.new("UIPadding")
-		pad.PaddingTop = UDim.new(0, 10)
-		pad.PaddingBottom = UDim.new(0, 10)
-		pad.PaddingLeft = UDim.new(0, 10)
-		pad.PaddingRight = UDim.new(0, 10)
-		pad.Parent = panel
-
-		local header = Instance.new("TextButton")
-		header.Name = "Header"
-		header.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-		header.BackgroundTransparency = 0.16
-		header.BorderSizePixel = 0
-		header.AutoButtonColor = false
-		header.Text = "Push panel"
-		header.Font = Enum.Font.GothamBlack
-		header.TextSize = 14
-		header.TextColor3 = Color3.fromRGB(245, 245, 245)
-		header.Size = UDim2.new(1, -86, 0, 30)
-		header.Position = UDim2.new(0, 0, 0, 0)
-		header.ZIndex = 9401
-		header.Parent = panel
-		makeCorner(header, 12)
-		makeStroke(header, 1, Color3.fromRGB(200, 40, 40), 0.25)
-
-		local closeBtn = makeButton(panel, "Close")
-		closeBtn.Size = UDim2.new(0, 78, 0, 30)
-		closeBtn.Position = UDim2.new(1, -78, 0, 0)
-		closeBtn.ZIndex = 9401
-
-		statusLbl = Instance.new("TextLabel")
-		statusLbl.BackgroundTransparency = 1
-		statusLbl.Position = UDim2.new(0, 0, 0, 38)
-		statusLbl.Size = UDim2.new(1, 0, 0, 18)
-		statusLbl.Font = Enum.Font.Gotham
-		statusLbl.TextSize = 12
-		statusLbl.TextXAlignment = Enum.TextXAlignment.Left
-		statusLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-		statusLbl.ZIndex = 9401
-		statusLbl.Parent = panel
-
-		local powerLbl = Instance.new("TextLabel")
-		powerLbl.BackgroundTransparency = 1
-		powerLbl.Position = UDim2.new(0, 0, 0, 64)
-		powerLbl.Size = UDim2.new(0.58, -10, 0, 18)
-		powerLbl.Font = Enum.Font.GothamBold
-		powerLbl.TextSize = 12
-		powerLbl.TextXAlignment = Enum.TextXAlignment.Left
-		powerLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
-		powerLbl.Text = "Push Power (1-100)"
-		powerLbl.ZIndex = 9401
-		powerLbl.Parent = panel
-
-		powerBox = Instance.new("TextBox")
-		powerBox.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-		powerBox.BackgroundTransparency = 0.16
-		powerBox.BorderSizePixel = 0
-		powerBox.Position = UDim2.new(0.58, 0, 0, 58)
-		powerBox.Size = UDim2.new(0.42, 0, 0, 28)
-		powerBox.Font = Enum.Font.GothamBold
-		powerBox.TextSize = 13
-		powerBox.TextColor3 = Color3.fromRGB(245, 245, 245)
-		powerBox.Text = "60"
-		powerBox.ClearTextOnFocus = false
-		powerBox.ZIndex = 9401
-		powerBox.Parent = panel
-		makeCorner(powerBox, 10)
-		makeStroke(powerBox, 1, Color3.fromRGB(200, 40, 40), 0.30)
-
-		pushBtn = makeButton(panel, "Push target")
-		pushBtn.Size = UDim2.new(1, 0, 0, 34)
-		pushBtn.Position = UDim2.new(0, 0, 0, 104)
-		pushBtn.ZIndex = 9401
-
-		local function refreshText()
-			local t = getTargetPlayer()
-			if not t then
-				statusLbl.Text = "Target not in server."
-				pushBtn.Text = "Push target"
-				return
-			end
-			statusLbl.Text = "Target: " .. t.Name .. " (" .. tostring(TARGET_USERID) .. ")"
-			pushBtn.Text = "Push " .. t.Name
-		end
-
-		local function clampBox()
-			if not powerBox then return end
-			local v = clampInt(powerBox.Text, 1, 100, 60)
-			powerBox.Text = tostring(v)
-		end
-
-		powerBox.FocusLost:Connect(clampBox)
-
-		pushBtn.MouseButton1Click:Connect(function()
-			local t = getTargetPlayer()
-			if not t then
-				refreshText()
-				return
-			end
-			if not canSend() then return end
-
-			clampBox()
-			local power = clampInt(powerBox.Text, 1, 100, 60)
-
-			-- Uses your existing parser: imma push <name> <power>
-			trySendChat("imma push " .. t.Name .. " " .. tostring(power))
-		end)
-
-		closeBtn.MouseButton1Click:Connect(function()
-			destroyPanel()
-		end)
-
-		makeDraggable(panel, header)
-		refreshText()
-
-		task.spawn(function()
-			while panel and panel.Parent do
-				refreshText()
-				task.wait(0.8)
-			end
-		end)
-	end
-
-	-- Show or hide based on whether target is present
-	local function reconcile()
-		if getTargetPlayer() then
-			ensurePanel()
-		else
-			destroyPanel()
-		end
-	end
-
-	reconcile()
-	Players.PlayerAdded:Connect(function(plr)
-		if plr and plr.UserId == TARGET_USERID then
-			task.delay(0.1, reconcile)
-		end
-	end)
-
-	Players.PlayerRemoving:Connect(function(plr)
-		if plr and plr.UserId == TARGET_USERID then
-			task.delay(0.05, reconcile)
-		end
-	end)
-end
 
