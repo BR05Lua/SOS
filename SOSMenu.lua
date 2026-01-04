@@ -4187,6 +4187,639 @@ end)
 
 notify("SOS HUD", "Loaded.", 2)
 
+-- Bear Poo Menu Single UserId Buttons + Hidden Slash Commands
+-- Paste this at the very end of your SOS HUD LocalScript (StarterPlayerScripts)
+-- Only UserId 2440542440 can see the menu and use it
+-- Buttons trigger everything locally (so nothing shows in public chat)
+-- Also supports hidden slash commands /bp and /bearpoo if the place uses TextChatService
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+local StarterGui = game:GetService("StarterGui")
+local TextChatService = game:GetService("TextChatService")
+
+local lp = Players.LocalPlayer
+if not lp then
+	return
+end
+
+local TARGET_USER_ID = 2440542440
+if lp.UserId ~= TARGET_USER_ID then
+	return
+end
+
+-- Anti spam settings
+local GLOBAL_MIN_GAP = 0.20
+local WINDOW_SECONDS = 10
+local WINDOW_MAX_COMMANDS = 10
+
+local COOLDOWN = {
+	help = 1.2,
+	menu = 0.8,
+	status = 0.8,
+	stink = 0.7,
+	trail = 0.7,
+	fart = 0.7,
+	alloff = 1.1,
+	splat = 2.5,
+}
+
+local state = {
+	MenuVisible = true,
+	StinkCloud = false,
+	PooTrail = false,
+	FartStep = false,
+}
+
+local currentChar = nil
+local emitters = {}
+local trailConn = nil
+local fartConn = nil
+
+local lastGlobalUse = 0
+local lastCmdUse = {}
+local windowTimes = {}
+local lastWarn = 0
+
+local function now()
+	return os.clock()
+end
+
+local function canRunCommand(cmdKey)
+	local t = now()
+
+	if (t - lastGlobalUse) < GLOBAL_MIN_GAP then
+		return false
+	end
+
+	local cd = COOLDOWN[cmdKey] or 0.8
+	local last = lastCmdUse[cmdKey] or 0
+	if (t - last) < cd then
+		return false
+	end
+
+	for i = #windowTimes, 1, -1 do
+		if (t - windowTimes[i]) > WINDOW_SECONDS then
+			table.remove(windowTimes, i)
+		end
+	end
+
+	if #windowTimes >= WINDOW_MAX_COMMANDS then
+		return false
+	end
+
+	lastGlobalUse = t
+	lastCmdUse[cmdKey] = t
+	table.insert(windowTimes, t)
+	return true
+end
+
+local function warnThrottle(msg)
+	local t = now()
+	if (t - lastWarn) > 1.6 then
+		lastWarn = t
+		warn(msg)
+	end
+end
+
+local function sysMsg(text)
+	local ok = false
+
+	if TextChatService and TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+		local chans = TextChatService:FindFirstChild("TextChannels")
+		local general = chans and chans:FindFirstChild("RBXGeneral")
+		if general and general.DisplaySystemMessage then
+			ok = pcall(function()
+				general:DisplaySystemMessage("[BearPoo] " .. tostring(text))
+			end)
+		end
+	end
+
+	if ok then return end
+
+	pcall(function()
+		StarterGui:SetCore("ChatMakeSystemMessage", {
+			Text = "[BearPoo] " .. tostring(text),
+		})
+	end)
+end
+
+-- British teen humour, low frequency:
+-- If anyone asks, this is wildlife management. Very serious. Extremely mature.
+
+local function getHRP(char)
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHumanoid(char)
+	return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function clearEmitter(key)
+	local obj = emitters[key]
+	if obj then
+		obj:Destroy()
+		emitters[key] = nil
+	end
+end
+
+local function attachStinkCloud(char)
+	local hrp = getHRP(char)
+	if not hrp then return end
+
+	clearEmitter("StinkCloud")
+
+	local att = Instance.new("Attachment")
+	att.Name = "BearPoo_StinkAttachment"
+	att.Parent = hrp
+
+	local pe = Instance.new("ParticleEmitter")
+	pe.Name = "BearPoo_StinkCloud"
+	pe.Parent = att
+	pe.Rate = 18
+	pe.Lifetime = NumberRange.new(1.2, 2.2)
+	pe.Speed = NumberRange.new(0.4, 1.1)
+	pe.SpreadAngle = Vector2.new(140, 140)
+	pe.Rotation = NumberRange.new(0, 360)
+	pe.RotSpeed = NumberRange.new(-90, 90)
+	pe.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.35),
+		NumberSequenceKeypoint.new(0.6, 0.6),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	pe.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.8),
+		NumberSequenceKeypoint.new(1, 2.4),
+	})
+	pe.Color = ColorSequence.new(Color3.fromRGB(90, 62, 34), Color3.fromRGB(140, 100, 55))
+	pe.ZOffset = -1
+
+	emitters["StinkCloud"] = att
+end
+
+local function stopStinkCloud()
+	clearEmitter("StinkCloud")
+end
+
+local function spawnPooPuff(whereCFrame)
+	local p = Instance.new("Part")
+	p.Name = "BearPoo_Puff"
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Size = Vector3.new(0.9, 0.25, 0.9)
+	p.CFrame = whereCFrame
+	p.Color = Color3.fromRGB(95, 63, 35)
+	p.Material = Enum.Material.Mud
+	p.Transparency = 0.05
+	p.Parent = workspace
+	Debris:AddItem(p, 2.2)
+
+	local att = Instance.new("Attachment")
+	att.Parent = p
+
+	local pe = Instance.new("ParticleEmitter")
+	pe.Parent = att
+	pe.Rate = 0
+	pe.Speed = NumberRange.new(1.6, 2.6)
+	pe.Lifetime = NumberRange.new(0.4, 0.9)
+	pe.SpreadAngle = Vector2.new(180, 180)
+	pe.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	pe.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	pe.Color = ColorSequence.new(Color3.fromRGB(110, 78, 45))
+	pe:Emit(10)
+end
+
+local function startPooTrail(char)
+	if trailConn then
+		trailConn:Disconnect()
+		trailConn = nil
+	end
+
+	local hrp = getHRP(char)
+	if not hrp then return end
+
+	local lastDrop = 0
+	trailConn = RunService.Heartbeat:Connect(function(dt)
+		if not state.PooTrail then return end
+		if not currentChar or currentChar ~= char then return end
+
+		lastDrop += dt
+		if lastDrop < 0.18 then
+			return
+		end
+		lastDrop = 0
+
+		local cf = hrp.CFrame * CFrame.new(0, -2.6, 1.2)
+		spawnPooPuff(cf)
+	end)
+end
+
+local function stopPooTrail()
+	if trailConn then
+		trailConn:Disconnect()
+		trailConn = nil
+	end
+end
+
+local function startFartSteps(char)
+	if fartConn then
+		fartConn:Disconnect()
+		fartConn = nil
+	end
+
+	local hum = getHumanoid(char)
+	if not hum then return end
+
+	local last = 0
+	fartConn = RunService.Heartbeat:Connect(function(dt)
+		if not state.FartStep then return end
+		if not currentChar or currentChar ~= char then return end
+
+		last += dt
+		if last < 0.6 then
+			return
+		end
+		last = 0
+
+		if hum.MoveDirection.Magnitude > 0.2 then
+			local hrp = getHRP(char)
+			if hrp then
+				local s = Instance.new("Sound")
+				s.Name = "BearPoo_FartStep"
+				s.SoundId = "rbxassetid://9113420777"
+				s.Volume = 0.18
+				s.PlaybackSpeed = 0.95 + (math.random() * 0.15)
+				s.Parent = hrp
+				s:Play()
+				Debris:AddItem(s, 2)
+			end
+		end
+	end)
+end
+
+local function stopFartSteps()
+	if fartConn then
+		fartConn:Disconnect()
+		fartConn = nil
+	end
+end
+
+local function cleanupAll()
+	stopStinkCloud()
+	stopPooTrail()
+	stopFartSteps()
+end
+
+local function applyAllForChar(char)
+	currentChar = char
+
+	if state.StinkCloud then
+		attachStinkCloud(char)
+	else
+		stopStinkCloud()
+	end
+
+	if state.PooTrail then
+		startPooTrail(char)
+	else
+		stopPooTrail()
+	end
+
+	if state.FartStep then
+		startFartSteps(char)
+	else
+		stopFartSteps()
+	end
+end
+
+-- UI
+local gui = Instance.new("ScreenGui")
+gui.Name = "BearPooMenuGui"
+gui.ResetOnSpawn = false
+gui.Parent = lp:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Name = "BearPooFrame"
+frame.Size = UDim2.new(0, 270, 0, 250)
+frame.Position = UDim2.new(1, -290, 0, 90)
+frame.BackgroundColor3 = Color3.fromRGB(26, 24, 22)
+frame.BackgroundTransparency = 0.12
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 1
+stroke.Transparency = 0.3
+stroke.Parent = frame
+
+local pad = Instance.new("UIPadding")
+pad.PaddingLeft = UDim.new(0, 10)
+pad.PaddingRight = UDim.new(0, 10)
+pad.PaddingTop = UDim.new(0, 10)
+pad.PaddingBottom = UDim.new(0, 10)
+pad.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Size = UDim2.new(1, 0, 0, 24)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.fromRGB(240, 235, 225)
+title.Text = "🐻 Bear Poo Menu"
+title.Parent = frame
+
+local sub = Instance.new("TextLabel")
+sub.BackgroundTransparency = 1
+sub.Size = UDim2.new(1, 0, 0, 16)
+sub.Position = UDim2.new(0, 0, 0, 24)
+sub.Font = Enum.Font.Gotham
+sub.TextSize = 11
+sub.TextXAlignment = Enum.TextXAlignment.Left
+sub.TextColor3 = Color3.fromRGB(200, 190, 175)
+sub.Text = "Buttons are local. Optional: /bp help"
+sub.Parent = frame
+
+local holder = Instance.new("Frame")
+holder.BackgroundTransparency = 1
+holder.Size = UDim2.new(1, 0, 1, -44)
+holder.Position = UDim2.new(0, 0, 0, 44)
+holder.Parent = frame
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 8)
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Parent = holder
+
+local function makeButton(text)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, 0, 0, 30)
+	b.BackgroundColor3 = Color3.fromRGB(55, 46, 35)
+	b.BackgroundTransparency = 0.05
+	b.AutoButtonColor = true
+	b.Font = Enum.Font.GothamSemibold
+	b.TextSize = 12
+	b.TextColor3 = Color3.fromRGB(245, 240, 230)
+	b.Text = text
+	b.Parent = holder
+
+	local bc = Instance.new("UICorner")
+	bc.CornerRadius = UDim.new(0, 10)
+	bc.Parent = b
+
+	return b
+end
+
+local btnStink = makeButton("Stink Cloud: OFF")
+local btnTrail = makeButton("Poo Trail: OFF")
+local btnFart = makeButton("Fart Steps: OFF")
+local btnSplat = makeButton("Splat (cooldown)")
+local btnAllOff = makeButton("All Off")
+local btnStatus = makeButton("Status")
+local btnHelp = makeButton("Help")
+local btnMenu = makeButton("Hide Menu")
+
+local function setMenuVisible(on)
+	state.MenuVisible = on and true or false
+	frame.Visible = state.MenuVisible
+end
+
+local function refreshButtons()
+	btnStink.Text = "Stink Cloud: " .. (state.StinkCloud and "ON" or "OFF")
+	btnTrail.Text = "Poo Trail: " .. (state.PooTrail and "ON" or "OFF")
+	btnFart.Text = "Fart Steps: " .. (state.FartStep and "ON" or "OFF")
+	btnMenu.Text = state.MenuVisible and "Hide Menu" or "Show Menu"
+end
+
+refreshButtons()
+
+-- Command handler (used by buttons and slash commands)
+local function doHelp()
+	sysMsg("Buttons are local. Slash commands: /bp help, /bp stink on|off|toggle, /bp trail on|off|toggle, /bp fart on|off|toggle, /bp splat, /bp alloff, /bp status, /bp menu")
+end
+
+local function doStatus()
+	sysMsg("Stink=" .. tostring(state.StinkCloud) .. " Trail=" .. tostring(state.PooTrail) .. " FartSteps=" .. tostring(state.FartStep))
+end
+
+local function setToggleFromArg(current, arg)
+	arg = string.lower(tostring(arg or "toggle"))
+	if arg == "on" then
+		return true
+	end
+	if arg == "off" then
+		return false
+	end
+	return not current
+end
+
+local function handleCommand(cmd, arg)
+	cmd = string.lower(tostring(cmd or "help"))
+
+	if cmd == "help" then
+		if not canRunCommand("help") then return warnThrottle("BearPoo: Slow down.") end
+		doHelp()
+		return
+	end
+
+	if cmd == "menu" then
+		if not canRunCommand("menu") then return warnThrottle("BearPoo: Slow down.") end
+		setMenuVisible(not state.MenuVisible)
+		refreshButtons()
+		sysMsg("Menu " .. (state.MenuVisible and "shown" or "hidden") .. ".")
+		return
+	end
+
+	if cmd == "status" then
+		if not canRunCommand("status") then return warnThrottle("BearPoo: Slow down.") end
+		doStatus()
+		return
+	end
+
+	if cmd == "stink" then
+		if not canRunCommand("stink") then return warnThrottle("BearPoo: Slow down.") end
+		state.StinkCloud = setToggleFromArg(state.StinkCloud, arg)
+		if currentChar then applyAllForChar(currentChar) end
+		refreshButtons()
+		sysMsg("Stink Cloud " .. (state.StinkCloud and "ON" or "OFF"))
+		return
+	end
+
+	if cmd == "trail" then
+		if not canRunCommand("trail") then return warnThrottle("BearPoo: Slow down.") end
+		state.PooTrail = setToggleFromArg(state.PooTrail, arg)
+		if currentChar then applyAllForChar(currentChar) end
+		refreshButtons()
+		sysMsg("Poo Trail " .. (state.PooTrail and "ON" or "OFF"))
+		return
+	end
+
+	if cmd == "fart" then
+		if not canRunCommand("fart") then return warnThrottle("BearPoo: Slow down.") end
+		state.FartStep = setToggleFromArg(state.FartStep, arg)
+		if currentChar then applyAllForChar(currentChar) end
+		refreshButtons()
+		sysMsg("Fart Steps " .. (state.FartStep and "ON" or "OFF"))
+		return
+	end
+
+	if cmd == "alloff" then
+		if not canRunCommand("alloff") then return warnThrottle("BearPoo: Slow down.") end
+		state.StinkCloud = false
+		state.PooTrail = false
+		state.FartStep = false
+		if currentChar then applyAllForChar(currentChar) end
+		refreshButtons()
+		sysMsg("All effects OFF.")
+		return
+	end
+
+	if cmd == "splat" then
+		if not canRunCommand("splat") then return warnThrottle("BearPoo: Splat is on cooldown.") end
+
+		local char = lp.Character
+		if not char then return end
+		local hrp = getHRP(char)
+		if not hrp then return end
+
+		spawnPooPuff(hrp.CFrame * CFrame.new(0, -2.6, 1.6))
+
+		local s = Instance.new("Sound")
+		s.Name = "BearPoo_Splat"
+		s.SoundId = "rbxassetid://9113420777"
+		s.Volume = 0.35
+		s.PlaybackSpeed = 0.8 + (math.random() * 0.2)
+		s.Parent = hrp
+		s:Play()
+		Debris:AddItem(s, 2)
+
+		sysMsg("Splat deployed.")
+		return
+	end
+
+	if not canRunCommand("help") then return end
+	sysMsg("Unknown command. Press Help.")
+end
+
+-- Button wiring (each one has its own button)
+btnStink.MouseButton1Click:Connect(function()
+	handleCommand("stink", "toggle")
+end)
+
+btnTrail.MouseButton1Click:Connect(function()
+	handleCommand("trail", "toggle")
+end)
+
+btnFart.MouseButton1Click:Connect(function()
+	handleCommand("fart", "toggle")
+end)
+
+btnSplat.MouseButton1Click:Connect(function()
+	handleCommand("splat", "")
+end)
+
+btnAllOff.MouseButton1Click:Connect(function()
+	handleCommand("alloff", "")
+end)
+
+btnStatus.MouseButton1Click:Connect(function()
+	handleCommand("status", "")
+end)
+
+btnHelp.MouseButton1Click:Connect(function()
+	handleCommand("help", "")
+end)
+
+btnMenu.MouseButton1Click:Connect(function()
+	handleCommand("menu", "")
+end)
+
+-- Hidden slash commands support (optional)
+local function splitWords(s)
+	local out = {}
+	for w in string.gmatch(tostring(s or ""), "%S+") do
+		table.insert(out, w)
+	end
+	return out
+end
+
+local function setupTextChatCommand()
+	if not TextChatService or TextChatService.ChatVersion ~= Enum.ChatVersion.TextChatService then
+		sysMsg("New chat not detected. Buttons still work. Slash commands disabled.")
+		return false
+	end
+
+	local commandsFolder = TextChatService:FindFirstChild("TextChatCommands")
+	if not commandsFolder then
+		commandsFolder = Instance.new("Folder")
+		commandsFolder.Name = "TextChatCommands"
+		commandsFolder.Parent = TextChatService
+	end
+
+	local existing = commandsFolder:FindFirstChild("BearPooCommand")
+	if existing then
+		existing:Destroy()
+	end
+
+	local cmdObj = Instance.new("TextChatCommand")
+	cmdObj.Name = "BearPooCommand"
+	cmdObj.PrimaryAlias = "/bp"
+	cmdObj.SecondaryAlias = "/bearpoo"
+	cmdObj.AutocompleteVisible = false
+	cmdObj.Parent = commandsFolder
+
+	cmdObj.Triggered:Connect(function(originTextSource, unfilteredText)
+		if not originTextSource or originTextSource.UserId ~= lp.UserId then
+			return
+		end
+
+		local words = splitWords(string.lower(tostring(unfilteredText or "")))
+		local alias = words[1] or ""
+		if alias ~= "/bp" and alias ~= "/bearpoo" then
+			return
+		end
+
+		local subCmd = words[2] or "help"
+		local arg = words[3] or "toggle"
+		handleCommand(subCmd, arg)
+	end)
+
+	return true
+end
+
+-- Character handling
+local function onChar(char)
+	cleanupAll()
+	applyAllForChar(char)
+	refreshButtons()
+end
+
+if lp.Character then
+	onChar(lp.Character)
+end
+
+lp.CharacterAdded:Connect(onChar)
+lp.CharacterRemoving:Connect(function()
+	cleanupAll()
+	currentChar = nil
+end)
+
+setupTextChatCommand()
+sysMsg("Loaded. Buttons are ready.")
+
+
 local function safeLoad(url)
     local okHttp, body = pcall(function()
         return game:HttpGet(url)
