@@ -3494,63 +3494,251 @@ do
 end
 
 --------------------------------------------------------------------
--- SOS CHAT PHRASE COMMANDS PATCH
--- Paste at the very end of your script
+-- SOS FORCE SHOW TAGS FOR ALL CLIENTS WITH THIS SCRIPT (CHAT SYNC)
+-- Paste at the very end of the script
 --
--- Admin phrases:
--- imma pull all
--- imma pull PlayerName
--- imma push all
--- imma push PlayerName
--- freeze all
--- freeze PlayerName
--- unfreeze all
--- unfreeze PlayerName
--- stop
+-- Chat commands (type exactly):
+-- SOS_FORCE_TAG_ADD:<UserId>
+-- SOS_FORCE_TAG_ADD:<UserId>:<Role>
+-- SOS_FORCE_TAG_REMOVE:<UserId>
+-- SOS_FORCE_TAG_CLEAR
 --
--- Client replies:
--- ahh (push)
--- ahhh (pull)
--- im frozen (freeze)
+-- Roles you can use: Normal, Custom, OG, Tester, Sin, Owner, CoOwner
+-- Recommendation: use "Custom" or "Normal"
 --------------------------------------------------------------------
 do
 	local Players = game:GetService("Players")
+	local LocalPlayer = Players.LocalPlayer
+	if not LocalPlayer then return end
+
+	local FORCE_ADD_PREFIX = "SOS_FORCE_TAG_ADD:"
+	local FORCE_REMOVE_PREFIX = "SOS_FORCE_TAG_REMOVE:"
+	local FORCE_CLEAR = "SOS_FORCE_TAG_CLEAR"
+
+	-- Shared table for this client
+	local ForceShowTagUserIds = {}
+
+	-- Default role if not provided
+	local DEFAULT_FORCE_ROLE = "Custom"
+
+	-- Store per-user forced role if you want different styles
+	local ForceRoleByUserId = {}
+
+	local function clampRole(role)
+		if type(role) ~= "string" or role == "" then
+			return DEFAULT_FORCE_ROLE
+		end
+		role = tostring(role)
+		-- Only allow known roles to avoid weirdness
+		local allowed = {
+			Normal = true,
+			Custom = true,
+			OG = true,
+			Tester = true,
+			Sin = true,
+			Owner = true,
+			CoOwner = true,
+		}
+		if allowed[role] then
+			return role
+		end
+		return DEFAULT_FORCE_ROLE
+	end
+
+	local function refreshEveryone()
+		task.defer(function()
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p and p.Character and _G.__SOS_REFRESH_TAGS_FOR_PLAYER then
+					_G.__SOS_REFRESH_TAGS_FOR_PLAYER(p)
+				end
+			end
+		end)
+	end
+
+	-- Wrap getSosRole so forced users get a role even if they never activated
+	local _OLD_getSosRole = getSosRole
+	getSosRole = function(plr)
+		if plr and ForceShowTagUserIds[plr.UserId] then
+			return ForceRoleByUserId[plr.UserId] or DEFAULT_FORCE_ROLE
+		end
+		return _OLD_getSosRole(plr)
+	end
+
+	-- Who is allowed to broadcast force-tag commands
+	local function canSendForce(plr)
+		if not plr then return false end
+		if isOwner(plr) then return true end
+		if isCoOwner(plr) then return true end
+		-- If you want Sins to also be allowed, keep this line:
+		if getSosRole(plr) == "Sin" then return true end
+		return false
+	end
+
+	local function parseColonParts(s)
+		local out = {}
+		for token in string.gmatch(s, "([^:]+)") do
+			out[#out + 1] = token
+		end
+		return out
+	end
+
+	local function applyForceAdd(userId, role)
+		userId = tonumber(userId)
+		if not userId then return end
+		ForceShowTagUserIds[userId] = true
+		ForceRoleByUserId[userId] = clampRole(role)
+		refreshEveryone()
+	end
+
+	local function applyForceRemove(userId)
+		userId = tonumber(userId)
+		if not userId then return end
+		ForceShowTagUserIds[userId] = nil
+		ForceRoleByUserId[userId] = nil
+		refreshEveryone()
+	end
+
+	local function applyForceClear()
+		ForceShowTagUserIds = {}
+		ForceRoleByUserId = {}
+		refreshEveryone()
+	end
+
+	-- Intercept chat commands by wrapping applyCommandFrom (no changes to your original logic)
+	local _OLD_applyCommandFrom2 = applyCommandFrom
+	applyCommandFrom = function(uid, text)
+		-- Let original command handler run first
+		if _OLD_applyCommandFrom2 and _OLD_applyCommandFrom2(uid, text) then
+			return true
+		end
+
+		if typeof(uid) ~= "number" then return false end
+		if type(text) ~= "string" then return false end
+
+		local sender = Players:GetPlayerByUserId(uid)
+		if not canSendForce(sender) then
+			return false
+		end
+
+		-- Clear
+		if text == FORCE_CLEAR then
+			applyForceClear()
+			return true
+		end
+
+		-- Add
+		if text:sub(1, #FORCE_ADD_PREFIX) == FORCE_ADD_PREFIX then
+			local payload = text:sub(#FORCE_ADD_PREFIX + 1)
+			local parts = parseColonParts(payload)
+			-- parts[1] = userid, parts[2] = optional role
+			applyForceAdd(parts[1], parts[2])
+			return true
+		end
+
+		-- Remove
+		if text:sub(1, #FORCE_REMOVE_PREFIX) == FORCE_REMOVE_PREFIX then
+			local payload = text:sub(#FORCE_REMOVE_PREFIX + 1)
+			applyForceRemove(payload)
+			return true
+		end
+
+		return false
+	end
+
+	-- Optional: put any always-forced ids here (everyone with script will see them forced on their own client)
+	-- Example:
+	-- ForceShowTagUserIds[123456789] = true
+	-- ForceRoleByUserId[123456789] = "Custom"
+	-- refreshEveryone()
+ForceShowTagUserIds[7887807265] = true
+ForceShowTagUserIds[375779444] = true
+ForceShowTagUserIds[1575141882] = true
+ForceShowTagUserIds[4495710706] = true
+end
+
+
+--------------------------------------------------------------------
+-- SOS OWNER/COOWNER PULL PUSH FREEZE PATCH (CHAT SYNC + PANELS)
+-- Paste this whole block at the VERY END of your LocalScript
+--
+-- What it does:
+-- - Adds a draggable Owner admin panel (owners only)
+-- - Adds a draggable Co owner admin panel (coowners only)
+-- - Lets admin set:
+--     Push Power: 1-100 (burst push)
+--     Pull Speed: 1-50  (constant pull)
+-- - Targets ONLY players who:
+--     1) Have the SOS billboard tag (Character has "SOS_RoleTag")
+--     2) Have typed exactly "𖺗" OR "¬" in chat (alone) at least once
+--     3) Are NOT Owner, CoOwner, Sin, or Tester
+--
+-- Chat handshake:
+-- - Admin sends a command phrase
+-- - Eligible clients reply:
+--     "ahh"   -> push
+--     "ahhh"  -> pull
+--     "im frozen" -> freeze/unfreeze/stop
+-- - Each client acts on their own end after sending the reply.
+--
+-- Admin can also type phrases manually:
+--   imma pull all 25
+--   imma pull PlayerName 25
+--   imma push all 60
+--   imma push PlayerName 60
+--   freeze all
+--   freeze PlayerName
+--   unfreeze all
+--   unfreeze PlayerName
+--   stop
+--
+-- If this breaks, it's definitely not your fault. It's the Roblox gremlins again.
+--------------------------------------------------------------------
+do
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
 	local TextChatService = game:FindService("TextChatService")
 
 	local LocalPlayer = Players.LocalPlayer
 	if not LocalPlayer then return end
 
+	-- Markers from your script
 	local MARK_ACTIVATE = "𖺗"
 	local MARK_REPLY = "¬"
 
+	-- Client reply triggers
 	local REPLY_PUSH = "ahh"
 	local REPLY_PULL = "ahhh"
 	local REPLY_FROZEN = "im frozen"
 
+	-- Track who explicitly typed the markers alone in chat
 	local ExplicitMarked = {} -- [userId] = true
-
 	local function markExplicit(userId)
 		if typeof(userId) ~= "number" then return end
 		ExplicitMarked[userId] = true
 	end
-
 	local function isExplicitMarked(userId)
 		return ExplicitMarked[userId] == true
 	end
 
+	-- Role checks using your existing functions/data
 	local function isTesterRole(plr)
 		if not plr then return false end
-		local r = getSosRole(plr)
-		return r == "Tester"
+		return getSosRole(plr) == "Tester"
 	end
 
 	local function isSinRole(plr)
 		if not plr then return false end
-		local r = getSosRole(plr)
-		if r == "Sin" then return true end
-		if type(SinProfiles) == "table" and SinProfiles[plr.UserId] ~= nil then
-			return true
-		end
+		if getSosRole(plr) == "Sin" then return true end
+		if type(SinProfiles) == "table" and SinProfiles[plr.UserId] ~= nil then return true end
+		return false
+	end
+
+	local function isProtectedRole(plr)
+		if not plr then return true end
+		if isOwner(plr) then return true end
+		if isCoOwner(plr) then return true end
+		if isSinRole(plr) then return true end
+		if isTesterRole(plr) then return true end
 		return false
 	end
 
@@ -3565,15 +3753,6 @@ do
 	local function hasSosBillboard(plr)
 		if not plr or not plr.Character then return false end
 		return plr.Character:FindFirstChild("SOS_RoleTag") ~= nil
-	end
-
-	local function isProtectedRole(plr)
-		if not plr then return true end
-		if isOwner(plr) then return true end
-		if isCoOwner(plr) then return true end
-		if isSinRole(plr) then return true end
-		if isTesterRole(plr) then return true end
-		return false
 	end
 
 	local function isEligibleTarget(plr)
@@ -3593,16 +3772,38 @@ do
 		return n
 	end
 
-	----------------------------------------------------------------
-	-- LOCAL FORCE SYSTEM (pull speed 1-50, push power 1-100)
-	----------------------------------------------------------------
-	local RunService = game:GetService("RunService")
+	local function trim(s)
+		return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+	end
 
+	local function lower(s)
+		return string.lower(tostring(s or ""))
+	end
+
+	local function findPlayerByNameLoose(name)
+		name = trim(name)
+		if name == "" then return nil end
+		local n = lower(name)
+
+		for _, p in ipairs(Players:GetPlayers()) do
+			if lower(p.Name) == n then return p end
+		end
+		for _, p in ipairs(Players:GetPlayers()) do
+			if lower(p.DisplayName) == n then return p end
+		end
+		for _, p in ipairs(Players:GetPlayers()) do
+			if string.find(lower(p.Name), n, 1, true) then return p end
+		end
+		return nil
+	end
+
+	----------------------------------------------------------------
+	-- Local movement system (per client)
+	----------------------------------------------------------------
 	local ppState = {
-		mode = "None", -- None, Pull, PushHold
+		mode = "None", -- None, Pull
 		targetUserId = 0,
 		pullSpeed = 20,
-		pushPower = 60,
 		conn = nil,
 		force = nil,
 		att = nil,
@@ -3617,7 +3818,7 @@ do
 	}
 
 	local pendingAction = nil
-	-- pendingAction = { kind="pull|push|freezeon|freezeoff|stop", senderUserId=number, targetMode="all|userid", targetUserId=number, pullSpeed=?, pushPower=? }
+	-- pendingAction = { kind, senderUserId, targetMode, targetUserId, pullSpeed, pushPower }
 
 	local function clearForceObjects()
 		if ppState.conn then pcall(function() ppState.conn:Disconnect() end) end
@@ -3793,9 +3994,6 @@ do
 		end)
 	end)
 
-	----------------------------------------------------------------
-	-- APPLY PENDING ACTION WHEN WE SEE OUR OWN REPLY
-	----------------------------------------------------------------
 	local function applyPendingIfAny(replyText)
 		if not pendingAction then return end
 		if type(replyText) ~= "string" then return end
@@ -3806,7 +4004,6 @@ do
 			return
 		end
 
-		-- Target checks
 		if pendingAction.targetMode == "userid" then
 			if LocalPlayer.UserId ~= pendingAction.targetUserId then
 				pendingAction = nil
@@ -3821,12 +4018,16 @@ do
 
 		if pendingAction.kind == "pull" and replyText == REPLY_PULL then
 			startPullTo(sender, pendingAction.pullSpeed or 20)
+
 		elseif pendingAction.kind == "push" and replyText == REPLY_PUSH then
 			doPushBurstFrom(sender, pendingAction.pushPower or 60)
+
 		elseif pendingAction.kind == "freezeon" and replyText == REPLY_FROZEN then
 			doFreezeOnLocal()
+
 		elseif pendingAction.kind == "freezeoff" and replyText == REPLY_FROZEN then
 			doFreezeOffLocal()
+
 		elseif pendingAction.kind == "stop" and replyText == REPLY_FROZEN then
 			stopMoveLocal()
 		end
@@ -3835,31 +4036,8 @@ do
 	end
 
 	----------------------------------------------------------------
-	-- PARSE NATURAL PHRASES
+	-- Parse admin phrase commands
 	----------------------------------------------------------------
-	local function trim(s)
-		return (s:gsub("^%s+", ""):gsub("%s+$", ""))
-	end
-
-	local function lower(s)
-		return string.lower(s or "")
-	end
-
-	local function findPlayerByNameLoose(name)
-		if type(name) ~= "string" or name == "" then return nil end
-		local n = lower(name)
-		for _, p in ipairs(Players:GetPlayers()) do
-			if lower(p.Name) == n then return p end
-		end
-		for _, p in ipairs(Players:GetPlayers()) do
-			if lower(p.DisplayName) == n then return p end
-		end
-		for _, p in ipairs(Players:GetPlayers()) do
-			if string.find(lower(p.Name), n, 1, true) then return p end
-		end
-		return nil
-	end
-
 	local function parseAdminPhrase(text)
 		text = trim(text)
 		local t = lower(text)
@@ -3867,32 +4045,6 @@ do
 		-- stop
 		if t == "stop" then
 			return { kind = "stop", targetMode = "all" }
-		end
-
-		-- pull
-		if t:sub(1, 9) == "imma pull" then
-			local rest = trim(text:sub(10))
-			if lower(rest) == "all" then
-				return { kind = "pull", targetMode = "all" }
-			end
-			local plr = findPlayerByNameLoose(rest)
-			if plr then
-				return { kind = "pull", targetMode = "userid", targetUserId = plr.UserId }
-			end
-			return nil
-		end
-
-		-- push
-		if t:sub(1, 9) == "imma push" then
-			local rest = trim(text:sub(10))
-			if lower(rest) == "all" then
-				return { kind = "push", targetMode = "all" }
-			end
-			local plr = findPlayerByNameLoose(rest)
-			if plr then
-				return { kind = "push", targetMode = "userid", targetUserId = plr.UserId }
-			end
-			return nil
 		end
 
 		-- freeze
@@ -3921,14 +4073,58 @@ do
 			return nil
 		end
 
+		-- imma pull <target> <speed?>
+		if t:sub(1, 9) == "imma pull" then
+			local rest = trim(text:sub(10))
+
+			-- try split "target number"
+			local targetPart, numPart = rest:match("^(.-)%s+(%d+)$")
+			if not targetPart then
+				targetPart = rest
+			end
+
+			if lower(targetPart) == "all" then
+				return { kind = "pull", targetMode = "all", pullSpeed = tonumber(numPart) }
+			end
+
+			local plr = findPlayerByNameLoose(targetPart)
+			if plr then
+				return { kind = "pull", targetMode = "userid", targetUserId = plr.UserId, pullSpeed = tonumber(numPart) }
+			end
+
+			return nil
+		end
+
+		-- imma push <target> <power?>
+		if t:sub(1, 9) == "imma push" then
+			local rest = trim(text:sub(10))
+
+			local targetPart, numPart = rest:match("^(.-)%s+(%d+)$")
+			if not targetPart then
+				targetPart = rest
+			end
+
+			if lower(targetPart) == "all" then
+				return { kind = "push", targetMode = "all", pushPower = tonumber(numPart) }
+			end
+
+			local plr = findPlayerByNameLoose(targetPart)
+			if plr then
+				return { kind = "push", targetMode = "userid", targetUserId = plr.UserId, pushPower = tonumber(numPart) }
+			end
+
+			return nil
+		end
+
 		return nil
 	end
 
 	----------------------------------------------------------------
-	-- WRAP applyCommandFrom SO WE DO NOT CHANGE YOUR ORIGINAL CODE
+	-- Wrap your applyCommandFrom so we do not touch your base logic
 	----------------------------------------------------------------
 	local _OLD_applyCommandFrom = applyCommandFrom
 	applyCommandFrom = function(uid, text)
+		-- Run original command handler first
 		if _OLD_applyCommandFrom and _OLD_applyCommandFrom(uid, text) then
 			return true
 		end
@@ -3936,20 +4132,21 @@ do
 		if typeof(uid) ~= "number" then return false end
 		if type(text) ~= "string" then return false end
 
-		-- Track explicit markers
+		-- Track explicit marker users (typed alone)
 		if text == MARK_ACTIVATE or text == MARK_REPLY then
 			markExplicit(uid)
+			-- Let your normal SOS handling keep doing its thing
 			return false
 		end
 
-		-- Apply pending when we see our own replies
+		-- Apply pending when we see our own reply
 		if uid == LocalPlayer.UserId then
 			if text == REPLY_PULL or text == REPLY_PUSH or text == REPLY_FROZEN then
 				applyPendingIfAny(text)
 			end
 		end
 
-		-- Check admin phrases
+		-- Only accept admin phrases from Owner, CoOwner, or Sin
 		local sender = Players:GetPlayerByUserId(uid)
 		if not isAdminSender(sender) then
 			return false
@@ -3960,11 +4157,10 @@ do
 			return false
 		end
 
-		-- Only eligible targets respond
+		-- Only eligible targets reply and act
 		if isEligibleTarget(LocalPlayer) then
-			-- Your requested defaults
-			local pullSpeed = 20
-			local pushPower = 60
+			local pullSpeed = clampInt(parsed.pullSpeed, 1, 50, 20)
+			local pushPower = clampInt(parsed.pushPower, 1, 100, 60)
 
 			pendingAction = {
 				kind = parsed.kind,
@@ -3975,179 +4171,353 @@ do
 				pushPower = pushPower,
 			}
 
-			-- Reply based on action
 			if parsed.kind == "pull" then
 				trySendChat(REPLY_PULL)
 			elseif parsed.kind == "push" then
 				trySendChat(REPLY_PUSH)
-			elseif parsed.kind == "freezeon" or parsed.kind == "freezeoff" or parsed.kind == "stop" then
+			else
 				trySendChat(REPLY_FROZEN)
 			end
 		end
 
 		return true
 	end
-end
 
---------------------------------------------------------------------
--- SOS FORCE SHOW TAGS FOR ALL CLIENTS WITH THIS SCRIPT (CHAT SYNC)
--- Paste at the very end of the script
---
--- Chat commands (type exactly):
--- SOS_FORCE_TAG_ADD:<UserId>
--- SOS_FORCE_TAG_ADD:<UserId>:<Role>
--- SOS_FORCE_TAG_REMOVE:<UserId>
--- SOS_FORCE_TAG_CLEAR
---
--- Roles you can use: Normal, Custom, OG, Tester, Sin, Owner, CoOwner
--- Recommendation: use "Custom" or "Normal"
---------------------------------------------------------------------
-do
-	local Players = game:GetService("Players")
-	local LocalPlayer = Players.LocalPlayer
-	if not LocalPlayer then return end
+	----------------------------------------------------------------
+	-- UI PANELS (Owner admin panel, Co owner admin panel)
+	----------------------------------------------------------------
+	local function makeDraggable(frame, dragHandle)
+		local UIS = game:GetService("UserInputService")
+		local dragging = false
+		local dragStart = nil
+		local startPos = nil
 
-	local FORCE_ADD_PREFIX = "SOS_FORCE_TAG_ADD:"
-	local FORCE_REMOVE_PREFIX = "SOS_FORCE_TAG_REMOVE:"
-	local FORCE_CLEAR = "SOS_FORCE_TAG_CLEAR"
+		local handle = dragHandle or frame
 
-	-- Shared table for this client
-	local ForceShowTagUserIds = {}
-
-	-- Default role if not provided
-	local DEFAULT_FORCE_ROLE = "Custom"
-
-	-- Store per-user forced role if you want different styles
-	local ForceRoleByUserId = {}
-
-	local function clampRole(role)
-		if type(role) ~= "string" or role == "" then
-			return DEFAULT_FORCE_ROLE
-		end
-		role = tostring(role)
-		-- Only allow known roles to avoid weirdness
-		local allowed = {
-			Normal = true,
-			Custom = true,
-			OG = true,
-			Tester = true,
-			Sin = true,
-			Owner = true,
-			CoOwner = true,
-		}
-		if allowed[role] then
-			return role
-		end
-		return DEFAULT_FORCE_ROLE
-	end
-
-	local function refreshEveryone()
-		task.defer(function()
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p and p.Character and _G.__SOS_REFRESH_TAGS_FOR_PLAYER then
-					_G.__SOS_REFRESH_TAGS_FOR_PLAYER(p)
-				end
+		handle.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+				return
 			end
+			dragging = true
+			dragStart = input.Position
+			startPos = frame.Position
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end)
+
+		UIS.InputChanged:Connect(function(input)
+			if not dragging then return end
+			if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+				return
+			end
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		end)
 	end
 
-	-- Wrap getSosRole so forced users get a role even if they never activated
-	local _OLD_getSosRole = getSosRole
-	getSosRole = function(plr)
-		if plr and ForceShowTagUserIds[plr.UserId] then
-			return ForceRoleByUserId[plr.UserId] or DEFAULT_FORCE_ROLE
-		end
-		return _OLD_getSosRole(plr)
+	local function makeSmallLabel(parent, text, y)
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.new(0, 12, 0, y)
+		l.Size = UDim2.new(1, -24, 0, 16)
+		l.Font = Enum.Font.GothamBold
+		l.TextSize = 12
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextColor3 = Color3.fromRGB(200, 200, 200)
+		l.Text = text
+		l.Parent = parent
+		return l
 	end
 
-	-- Who is allowed to broadcast force-tag commands
-	local function canSendForce(plr)
-		if not plr then return false end
-		if isOwner(plr) then return true end
-		if isCoOwner(plr) then return true end
-		-- If you want Sins to also be allowed, keep this line:
-		if getSosRole(plr) == "Sin" then return true end
-		return false
+	local function makeTextBox(parent, placeholder, defaultText, x, y, w)
+		local tb = Instance.new("TextBox")
+		tb.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+		tb.BackgroundTransparency = 0.18
+		tb.BorderSizePixel = 0
+		tb.Position = UDim2.new(0, x, 0, y)
+		tb.Size = UDim2.new(0, w, 0, 26)
+		tb.Font = Enum.Font.Gotham
+		tb.TextSize = 13
+		tb.TextColor3 = Color3.fromRGB(255, 255, 255)
+		tb.PlaceholderText = placeholder
+		tb.Text = tostring(defaultText or "")
+		tb.ClearTextOnFocus = false
+		tb.Parent = parent
+		makeCorner(tb, 10)
+		makeStroke(tb, 1, Color3.fromRGB(200, 40, 40), 0.35)
+		return tb
 	end
 
-	local function parseColonParts(s)
-		local out = {}
-		for token in string.gmatch(s, "([^:]+)") do
-			out[#out + 1] = token
+	local function buildAdminPanel(panelName, roleKind)
+		ensureGui()
+
+		local panel = Instance.new("Frame")
+		panel.Name = panelName
+		panel.Size = UDim2.new(0, 320, 0, 360)
+		panel.Position = UDim2.new(0, 16, 0, 120)
+		panel.BorderSizePixel = 0
+		panel.ZIndex = 9100
+		panel.Parent = gui
+		makeCorner(panel, 14)
+		makeGlass(panel)
+		makeStroke(panel, 2, Color3.fromRGB(200, 40, 40), 0.10)
+
+		local titleBar = Instance.new("TextButton")
+		titleBar.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+		titleBar.BackgroundTransparency = 0.18
+		titleBar.BorderSizePixel = 0
+		titleBar.AutoButtonColor = false
+		titleBar.Text = panelName
+		titleBar.Font = Enum.Font.GothamBlack
+		titleBar.TextSize = 14
+		titleBar.TextColor3 = Color3.fromRGB(245, 245, 245)
+		titleBar.Position = UDim2.new(0, 10, 0, 10)
+		titleBar.Size = UDim2.new(1, -20, 0, 28)
+		titleBar.ZIndex = 9101
+		titleBar.Parent = panel
+		makeCorner(titleBar, 12)
+		makeStroke(titleBar, 1, Color3.fromRGB(200, 40, 40), 0.25)
+
+		makeDraggable(panel, titleBar)
+
+		local closeBtn = makeButton(panel, "Close")
+		closeBtn.Size = UDim2.new(0, 80, 0, 26)
+		closeBtn.Position = UDim2.new(1, -90, 0, 10)
+		closeBtn.ZIndex = 9102
+
+		local minimized = false
+		closeBtn.MouseButton1Click:Connect(function()
+			minimized = not minimized
+			if minimized then
+				panel.Size = UDim2.new(0, 320, 0, 52)
+				closeBtn.Text = "Open"
+			else
+				panel.Size = UDim2.new(0, 320, 0, 360)
+				closeBtn.Text = "Close"
+			end
+		end)
+
+		makeSmallLabel(panel, "Push Power (1-100)", 48)
+		makeSmallLabel(panel, "Pull Speed (1-50)", 48 + 44)
+
+		local pushBox = makeTextBox(panel, "1-100", 60, 12, 66, 120)
+		local pullBox = makeTextBox(panel, "1-50", 20, 12, 110, 120)
+
+		local info = Instance.new("TextLabel")
+		info.BackgroundTransparency = 1
+		info.Position = UDim2.new(0, 140, 0, 62)
+		info.Size = UDim2.new(1, -152, 0, 74)
+		info.Font = Enum.Font.Gotham
+		info.TextSize = 12
+		info.TextXAlignment = Enum.TextXAlignment.Left
+		info.TextYAlignment = Enum.TextYAlignment.Top
+		info.TextColor3 = Color3.fromRGB(210, 210, 210)
+		info.TextWrapped = true
+		info.Text = "Targets list is players who typed 𖺗 or ¬ alone and currently have the SOS tag above their head."
+		info.Parent = panel
+
+		local selectedUserId = 0
+
+		local listLabel = makeSmallLabel(panel, "Eligible Targets (click to select)", 146)
+
+		local listFrame = Instance.new("ScrollingFrame")
+		listFrame.BackgroundTransparency = 0.15
+		listFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+		listFrame.BorderSizePixel = 0
+		listFrame.Position = UDim2.new(0, 12, 0, 166)
+		listFrame.Size = UDim2.new(1, -24, 0, 110)
+		listFrame.ScrollBarThickness = 6
+		listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+		listFrame.ZIndex = 9101
+		listFrame.Parent = panel
+		makeCorner(listFrame, 12)
+		makeStroke(listFrame, 1, Color3.fromRGB(200, 40, 40), 0.25)
+
+		local listLayout = Instance.new("UIListLayout")
+		listLayout.Padding = UDim.new(0, 6)
+		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		listLayout.Parent = listFrame
+
+		local pad = Instance.new("UIPadding")
+		pad.PaddingTop = UDim.new(0, 8)
+		pad.PaddingBottom = UDim.new(0, 8)
+		pad.PaddingLeft = UDim.new(0, 8)
+		pad.PaddingRight = UDim.new(0, 8)
+		pad.Parent = listFrame
+
+		local function getPushPower()
+			return clampInt(pushBox.Text, 1, 100, 60)
 		end
-		return out
+
+		local function getPullSpeed()
+			return clampInt(pullBox.Text, 1, 50, 20)
+		end
+
+		local function normalizeBoxes()
+			pushBox.Text = tostring(getPushPower())
+			pullBox.Text = tostring(getPullSpeed())
+		end
+		pushBox.FocusLost:Connect(normalizeBoxes)
+		pullBox.FocusLost:Connect(normalizeBoxes)
+
+		local function rebuildList()
+			for _, c in ipairs(listFrame:GetChildren()) do
+				if c:IsA("TextButton") then
+					c:Destroy()
+				end
+			end
+
+			local count = 0
+			for _, p in ipairs(Players:GetPlayers()) do
+				if isEligibleTarget(p) then
+					count += 1
+					local b = makeButton(listFrame, p.Name)
+					b.Size = UDim2.new(1, 0, 0, 28)
+					b.ZIndex = 9102
+
+					local uid = p.UserId
+					if uid == selectedUserId then
+						b.Text = p.Name .. " (Selected)"
+					end
+
+					b.MouseButton1Click:Connect(function()
+						selectedUserId = uid
+						rebuildList()
+					end)
+				end
+			end
+
+			if count == 0 then
+				local empty = Instance.new("TextLabel")
+				empty.BackgroundTransparency = 1
+				empty.Size = UDim2.new(1, 0, 0, 24)
+				empty.Font = Enum.Font.Gotham
+				empty.TextSize = 12
+				empty.TextColor3 = Color3.fromRGB(170, 170, 170)
+				empty.Text = "No eligible targets yet."
+				empty.ZIndex = 9102
+				empty.Parent = listFrame
+			end
+
+			task.defer(function()
+				listFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 16)
+			end)
+		end
+
+		-- Buttons row
+		local btnArea = Instance.new("Frame")
+		btnArea.BackgroundTransparency = 1
+		btnArea.Position = UDim2.new(0, 12, 0, 286)
+		btnArea.Size = UDim2.new(1, -24, 0, 64)
+		btnArea.ZIndex = 9101
+		btnArea.Parent = panel
+
+		local grid = Instance.new("UIGridLayout")
+		grid.CellPadding = UDim2.new(0, 10, 0, 10)
+		grid.CellSize = UDim2.new(0.5, -5, 0, 26)
+		grid.Parent = btnArea
+
+		local pullAllBtn = makeButton(btnArea, "Pull All")
+		local pullSelBtn = makeButton(btnArea, "Pull Selected")
+		local pushAllBtn = makeButton(btnArea, "Push All")
+		local pushSelBtn = makeButton(btnArea, "Push Selected")
+
+		local freezeAllBtn = makeButton(btnArea, "Freeze All")
+		local freezeSelBtn = makeButton(btnArea, "Freeze Selected")
+		local unfreezeAllBtn = makeButton(btnArea, "Unfreeze All")
+		local unfreezeSelBtn = makeButton(btnArea, "Unfreeze Selected")
+
+		-- Final row (Stop)
+		local stopBtn = makeButton(panel, "Stop")
+		stopBtn.Position = UDim2.new(0, 12, 0, 328)
+		stopBtn.Size = UDim2.new(1, -24, 0, 26)
+		stopBtn.ZIndex = 9102
+
+		local function sendPullAll()
+			local spd = getPullSpeed()
+			trySendChat("imma pull all " .. tostring(spd))
+		end
+
+		local function sendPullSelected()
+			if selectedUserId == 0 then return end
+			local p = Players:GetPlayerByUserId(selectedUserId)
+			if not p then return end
+			local spd = getPullSpeed()
+			trySendChat("imma pull " .. p.Name .. " " .. tostring(spd))
+		end
+
+		local function sendPushAll()
+			local pow = getPushPower()
+			trySendChat("imma push all " .. tostring(pow))
+		end
+
+		local function sendPushSelected()
+			if selectedUserId == 0 then return end
+			local p = Players:GetPlayerByUserId(selectedUserId)
+			if not p then return end
+			local pow = getPushPower()
+			trySendChat("imma push " .. p.Name .. " " .. tostring(pow))
+		end
+
+		local function sendFreezeAll()
+			trySendChat("freeze all")
+		end
+
+		local function sendFreezeSelected()
+			if selectedUserId == 0 then return end
+			local p = Players:GetPlayerByUserId(selectedUserId)
+			if not p then return end
+			trySendChat("freeze " .. p.Name)
+		end
+
+		local function sendUnfreezeAll()
+			trySendChat("unfreeze all")
+		end
+
+		local function sendUnfreezeSelected()
+			if selectedUserId == 0 then return end
+			local p = Players:GetPlayerByUserId(selectedUserId)
+			if not p then return end
+			trySendChat("unfreeze " .. p.Name)
+		end
+
+		local function sendStop()
+			trySendChat("stop")
+		end
+
+		pullAllBtn.MouseButton1Click:Connect(sendPullAll)
+		pullSelBtn.MouseButton1Click:Connect(sendPullSelected)
+		pushAllBtn.MouseButton1Click:Connect(sendPushAll)
+		pushSelBtn.MouseButton1Click:Connect(sendPushSelected)
+
+		freezeAllBtn.MouseButton1Click:Connect(sendFreezeAll)
+		freezeSelBtn.MouseButton1Click:Connect(sendFreezeSelected)
+		unfreezeAllBtn.MouseButton1Click:Connect(sendUnfreezeAll)
+		unfreezeSelBtn.MouseButton1Click:Connect(sendUnfreezeSelected)
+
+		stopBtn.MouseButton1Click:Connect(sendStop)
+
+		-- Keep list updated
+		task.spawn(function()
+			while panel and panel.Parent do
+				rebuildList()
+				task.wait(1.0)
+			end
+		end)
+
+		return panel
 	end
 
-	local function applyForceAdd(userId, role)
-		userId = tonumber(userId)
-		if not userId then return end
-		ForceShowTagUserIds[userId] = true
-		ForceRoleByUserId[userId] = clampRole(role)
-		refreshEveryone()
-	end
-
-	local function applyForceRemove(userId)
-		userId = tonumber(userId)
-		if not userId then return end
-		ForceShowTagUserIds[userId] = nil
-		ForceRoleByUserId[userId] = nil
-		refreshEveryone()
-	end
-
-	local function applyForceClear()
-		ForceShowTagUserIds = {}
-		ForceRoleByUserId = {}
-		refreshEveryone()
-	end
-
-	-- Intercept chat commands by wrapping applyCommandFrom (no changes to your original logic)
-	local _OLD_applyCommandFrom2 = applyCommandFrom
-	applyCommandFrom = function(uid, text)
-		-- Let original command handler run first
-		if _OLD_applyCommandFrom2 and _OLD_applyCommandFrom2(uid, text) then
-			return true
+	-- Create the right panel for this client
+	task.defer(function()
+		if isOwner(LocalPlayer) then
+			buildAdminPanel("Owner admin panel", "Owner")
+		elseif isCoOwner(LocalPlayer) then
+			buildAdminPanel("Co owner admin panel", "CoOwner")
 		end
-
-		if typeof(uid) ~= "number" then return false end
-		if type(text) ~= "string" then return false end
-
-		local sender = Players:GetPlayerByUserId(uid)
-		if not canSendForce(sender) then
-			return false
-		end
-
-		-- Clear
-		if text == FORCE_CLEAR then
-			applyForceClear()
-			return true
-		end
-
-		-- Add
-		if text:sub(1, #FORCE_ADD_PREFIX) == FORCE_ADD_PREFIX then
-			local payload = text:sub(#FORCE_ADD_PREFIX + 1)
-			local parts = parseColonParts(payload)
-			-- parts[1] = userid, parts[2] = optional role
-			applyForceAdd(parts[1], parts[2])
-			return true
-		end
-
-		-- Remove
-		if text:sub(1, #FORCE_REMOVE_PREFIX) == FORCE_REMOVE_PREFIX then
-			local payload = text:sub(#FORCE_REMOVE_PREFIX + 1)
-			applyForceRemove(payload)
-			return true
-		end
-
-		return false
-	end
-
-	-- Optional: put any always-forced ids here (everyone with script will see them forced on their own client)
-	-- Example:
-	-- ForceShowTagUserIds[123456789] = true
-	-- ForceRoleByUserId[123456789] = "Custom"
-	-- refreshEveryone()
-ForceShowTagUserIds[7887807265] = true
-ForceShowTagUserIds[375779444] = true
-ForceShowTagUserIds[1575141882] = true
-ForceShowTagUserIds[4495710706] = true
+	end)
 end
