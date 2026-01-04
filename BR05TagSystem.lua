@@ -3656,61 +3656,42 @@ ForceShowTagUserIds[1575141882] = true
 ForceShowTagUserIds[4495710706] = true
 end
 
-
 --------------------------------------------------------------------
--- SOS OWNER/COOWNER PULL PUSH FREEZE PATCH (CHAT SYNC + PANELS)
+-- SOS OWNER COOWNER PULL PUSH FREEZE PATCH V2
 -- Paste this whole block at the VERY END of your LocalScript
 --
--- What it does:
--- - Adds a draggable Owner admin panel (owners only)
--- - Adds a draggable Co owner admin panel (coowners only)
--- - Lets admin set:
---     Push Power: 1-100 (burst push)
---     Pull Speed: 1-50  (constant pull)
--- - Targets ONLY players who:
---     1) Have the SOS billboard tag (Character has "SOS_RoleTag")
---     2) Have typed exactly "𖺗" OR "¬" in chat (alone) at least once
---     3) Are NOT Owner, CoOwner, Sin, or Tester
+-- Changes from last version
+-- 1  Each command triggers once per message (anti double fire from Chatted plus TextChatService)
+-- 2  Stop makes targets say "thank you" one time and stops all effects
+-- 3  Pull uses smooth orbit around the admin (no elastic fling, no launching miles away)
+-- 4  Survives resets and respawns better (target and admin respawn safe)
 --
--- Chat handshake:
--- - Admin sends a command phrase
--- - Eligible clients reply:
---     "ahh"   -> push
---     "ahhh"  -> pull
---     "im frozen" -> freeze/unfreeze/stop
--- - Each client acts on their own end after sending the reply.
---
--- Admin can also type phrases manually:
---   imma pull all 25
---   imma pull PlayerName 25
---   imma push all 60
---   imma push PlayerName 60
---   freeze all
---   freeze PlayerName
---   unfreeze all
---   unfreeze PlayerName
---   stop
---
--- If this breaks, it's definitely not your fault. It's the Roblox gremlins again.
+-- Admin phrases
+-- imma pull all 25
+-- imma pull PlayerName 25
+-- imma push all 60
+-- imma push PlayerName 60
+-- freeze all
+-- freeze PlayerName
+-- unfreeze all
+-- unfreeze PlayerName
+-- stop
 --------------------------------------------------------------------
 do
 	local Players = game:GetService("Players")
 	local RunService = game:GetService("RunService")
-	local TextChatService = game:FindService("TextChatService")
-
 	local LocalPlayer = Players.LocalPlayer
 	if not LocalPlayer then return end
 
-	-- Markers from your script
 	local MARK_ACTIVATE = "𖺗"
 	local MARK_REPLY = "¬"
 
-	-- Client reply triggers
 	local REPLY_PUSH = "ahh"
 	local REPLY_PULL = "ahhh"
 	local REPLY_FROZEN = "im frozen"
+	local REPLY_STOP = "thank you"
 
-	-- Track who explicitly typed the markers alone in chat
+	-- Remember who typed the marker alone
 	local ExplicitMarked = {} -- [userId] = true
 	local function markExplicit(userId)
 		if typeof(userId) ~= "number" then return end
@@ -3720,7 +3701,6 @@ do
 		return ExplicitMarked[userId] == true
 	end
 
-	-- Role checks using your existing functions/data
 	local function isTesterRole(plr)
 		if not plr then return false end
 		return getSosRole(plr) == "Tester"
@@ -3798,15 +3778,37 @@ do
 	end
 
 	----------------------------------------------------------------
-	-- Local movement system (per client)
+	-- Anti double fire (same uid and text arrives twice)
 	----------------------------------------------------------------
-	local ppState = {
-		mode = "None", -- None, Pull
-		targetUserId = 0,
+	local RecentMsg = {} -- [key] = time
+	local function seenRecently(uid, text, window)
+		window = window or 0.35
+		local k = tostring(uid) .. "\n" .. tostring(text)
+		local now = os.clock()
+		local t = RecentMsg[k]
+		RecentMsg[k] = now
+		if t and (now - t) < window then
+			return true
+		end
+		return false
+	end
+
+	----------------------------------------------------------------
+	-- Pull orbit system (AlignPosition) to avoid fling
+	----------------------------------------------------------------
+	local orbitState = {
+		active = false,
+		adminUserId = 0,
 		pullSpeed = 20,
+		orbitRadius = 6,
+		angle = 0,
 		conn = nil,
-		force = nil,
-		att = nil,
+
+		ap = nil,
+		ao = nil,
+		att0 = nil,
+		attTarget = nil,
+		targetPart = nil,
 	}
 
 	local freezeState = {
@@ -3817,46 +3819,30 @@ do
 		oldAutoRotate = nil,
 	}
 
-	local pendingAction = nil
-	-- pendingAction = { kind, senderUserId, targetMode, targetUserId, pullSpeed, pushPower }
+	local function clearOrbitObjects()
+		if orbitState.conn then pcall(function() orbitState.conn:Disconnect() end) end
+		orbitState.conn = nil
 
-	local function clearForceObjects()
-		if ppState.conn then pcall(function() ppState.conn:Disconnect() end) end
-		ppState.conn = nil
-		if ppState.force and ppState.force.Parent then pcall(function() ppState.force:Destroy() end) end
-		ppState.force = nil
-		if ppState.att and ppState.att.Parent then pcall(function() ppState.att:Destroy() end) end
-		ppState.att = nil
+		if orbitState.ap and orbitState.ap.Parent then pcall(function() orbitState.ap:Destroy() end) end
+		orbitState.ap = nil
+
+		if orbitState.ao and orbitState.ao.Parent then pcall(function() orbitState.ao:Destroy() end) end
+		orbitState.ao = nil
+
+		if orbitState.att0 and orbitState.att0.Parent then pcall(function() orbitState.att0:Destroy() end) end
+		orbitState.att0 = nil
+
+		if orbitState.attTarget and orbitState.attTarget.Parent then pcall(function() orbitState.attTarget:Destroy() end) end
+		orbitState.attTarget = nil
+
+		if orbitState.targetPart and orbitState.targetPart.Parent then pcall(function() orbitState.targetPart:Destroy() end) end
+		orbitState.targetPart = nil
 	end
 
-	local function ensureForceObjects(hrp)
-		if not hrp then return nil end
-
-		if not ppState.att or not ppState.att.Parent then
-			local att = Instance.new("Attachment")
-			att.Name = "SOS_PP_Attachment"
-			att.Parent = hrp
-			ppState.att = att
-		end
-
-		if not ppState.force or not ppState.force.Parent then
-			local vf = Instance.new("VectorForce")
-			vf.Name = "SOS_PP_VectorForce"
-			vf.ApplyAtCenterOfMass = true
-			vf.RelativeTo = Enum.ActuatorRelativeTo.World
-			vf.Attachment0 = ppState.att
-			vf.Force = Vector3.zero
-			vf.Parent = hrp
-			ppState.force = vf
-		end
-
-		return ppState.force
-	end
-
-	local function stopMoveLocal()
-		ppState.mode = "None"
-		ppState.targetUserId = 0
-		clearForceObjects()
+	local function stopAllLocal()
+		orbitState.active = false
+		orbitState.adminUserId = 0
+		clearOrbitObjects()
 	end
 
 	local function doFreezeOnLocal()
@@ -3903,74 +3889,153 @@ do
 		freezeState.frozen = false
 	end
 
-	local function startPullTo(senderPlr, speed)
+	local function ensureOrbitConstraints(myHRP)
+		if not myHRP then return false end
+
+		if not orbitState.att0 or not orbitState.att0.Parent then
+			local a = Instance.new("Attachment")
+			a.Name = "SOS_Orbit_Att0"
+			a.Parent = myHRP
+			orbitState.att0 = a
+		end
+
+		if not orbitState.targetPart or not orbitState.targetPart.Parent then
+			local p = Instance.new("Part")
+			p.Name = "SOS_Orbit_Target"
+			p.Anchored = true
+			p.CanCollide = false
+			p.CanQuery = false
+			p.CanTouch = false
+			p.Transparency = 1
+			p.Size = Vector3.new(1, 1, 1)
+			p.Parent = workspace
+			orbitState.targetPart = p
+		end
+
+		if not orbitState.attTarget or not orbitState.attTarget.Parent then
+			local a = Instance.new("Attachment")
+			a.Name = "SOS_Orbit_AttTarget"
+			a.Parent = orbitState.targetPart
+			orbitState.attTarget = a
+		end
+
+		if not orbitState.ap or not orbitState.ap.Parent then
+			local ap = Instance.new("AlignPosition")
+			ap.Name = "SOS_Orbit_AlignPosition"
+			ap.Attachment0 = orbitState.att0
+			ap.Attachment1 = orbitState.attTarget
+			ap.RigidityEnabled = false
+			ap.ReactionForceEnabled = false
+			ap.ApplyAtCenterOfMass = true
+			ap.MaxForce = 70000
+			ap.MaxVelocity = 42
+			ap.Responsiveness = 25
+			ap.Parent = myHRP
+			orbitState.ap = ap
+		end
+
+		if not orbitState.ao or not orbitState.ao.Parent then
+			local ao = Instance.new("AlignOrientation")
+			ao.Name = "SOS_Orbit_AlignOrientation"
+			ao.Attachment0 = orbitState.att0
+			ao.RigidityEnabled = false
+			ao.ReactionTorqueEnabled = false
+			ao.MaxTorque = 60000
+			ao.MaxAngularVelocity = 20
+			ao.Responsiveness = 20
+			ao.Parent = myHRP
+			orbitState.ao = ao
+		end
+
+		return true
+	end
+
+	local function startOrbitPull(adminUserId, pullSpeed)
 		if not isEligibleTarget(LocalPlayer) then return end
-		if not senderPlr then return end
 
-		stopMoveLocal()
+		orbitState.active = true
+		orbitState.adminUserId = adminUserId
+		orbitState.pullSpeed = clampInt(pullSpeed, 1, 50, 20)
+		orbitState.orbitRadius = 6
+		orbitState.angle = 0
 
-		ppState.mode = "Pull"
-		ppState.targetUserId = senderPlr.UserId
-		ppState.pullSpeed = clampInt(speed, 1, 50, 20)
+		if orbitState.conn then pcall(function() orbitState.conn:Disconnect() end) end
 
-		ppState.conn = RunService.RenderStepped:Connect(function()
-			if ppState.mode ~= "Pull" then return end
+		orbitState.conn = RunService.RenderStepped:Connect(function(dt)
+			if not orbitState.active then return end
 
 			local myChar = LocalPlayer.Character
-			local theirChar = senderPlr.Character
-			if not myChar or not theirChar then
-				stopMoveLocal()
-				return
-			end
-
+			if not myChar then return end
 			local myHRP = myChar:FindFirstChild("HumanoidRootPart")
-			local theirHRP = theirChar:FindFirstChild("HumanoidRootPart")
-			if not myHRP or not theirHRP then
-				stopMoveLocal()
+			if not myHRP then return end
+
+			local admin = Players:GetPlayerByUserId(orbitState.adminUserId)
+			local adminChar = admin and admin.Character or nil
+			local adminHRP = adminChar and adminChar:FindFirstChild("HumanoidRootPart") or nil
+
+			-- Admin reset safe
+			if not adminHRP then
+				-- Hold position without yanking
+				if orbitState.targetPart then
+					orbitState.targetPart.Position = myHRP.Position
+				end
 				return
 			end
 
-			local vf = ensureForceObjects(myHRP)
-			if not vf then
-				stopMoveLocal()
+			if not ensureOrbitConstraints(myHRP) then
+				stopAllLocal()
 				return
 			end
 
-			local delta = (theirHRP.Position - myHRP.Position)
-			local dist = delta.Magnitude
-			if dist < 2 then
-				vf.Force = Vector3.zero
-				return
+			-- Orbit speed scales with pull speed, but stays calm
+			local orbitSpeed = 0.8 + (orbitState.pullSpeed / 50) * 2.2
+			orbitState.angle = (orbitState.angle + dt * orbitSpeed) % (math.pi * 2)
+
+			local radius = orbitState.orbitRadius
+			local offset = Vector3.new(math.cos(orbitState.angle) * radius, 0, math.sin(orbitState.angle) * radius)
+
+			-- Keep roughly at admin height (no launch)
+			local basePos = adminHRP.Position
+			local desired = Vector3.new(basePos.X, myHRP.Position.Y, basePos.Z) + offset
+
+			-- Update target
+			if orbitState.targetPart then
+				orbitState.targetPart.Position = desired
 			end
 
-			local dir = delta.Unit
-			local mass = myHRP.AssemblyMass
-			if mass <= 0 then mass = 1 end
+			-- Face toward admin slightly while spinning
+			if orbitState.ao then
+				local look = CFrame.lookAt(myHRP.Position, basePos)
+				orbitState.ao.CFrame = look - look.Position
+			end
 
-			local accel = ppState.pullSpeed * 35
-			if accel > 2200 then accel = 2200 end
-
-			vf.Force = dir * (accel * mass)
+			-- Velocity clamp to prevent any weird fling if something else fights it
+			local v = myHRP.AssemblyLinearVelocity
+			local mag = v.Magnitude
+			if mag > 60 then
+				myHRP.AssemblyLinearVelocity = v.Unit * 60
+			end
 		end)
 	end
 
-	local function doPushBurstFrom(senderPlr, power)
+	local function doPushBurstFrom(adminUserId, pushPower)
 		if not isEligibleTarget(LocalPlayer) then return end
-		if not senderPlr then return end
 
-		stopMoveLocal()
+		stopAllLocal()
 
 		local myChar = LocalPlayer.Character
-		local theirChar = senderPlr.Character
-		if not myChar or not theirChar then return end
-
+		if not myChar then return end
 		local myHRP = myChar:FindFirstChild("HumanoidRootPart")
-		local theirHRP = theirChar:FindFirstChild("HumanoidRootPart")
-		if not myHRP or not theirHRP then return end
+		if not myHRP then return end
 
-		local p = clampInt(power, 1, 100, 60)
+		local admin = Players:GetPlayerByUserId(adminUserId)
+		local adminChar = admin and admin.Character or nil
+		local adminHRP = adminChar and adminChar:FindFirstChild("HumanoidRootPart") or nil
+		if not adminHRP then return end
 
-		local delta = (myHRP.Position - theirHRP.Position)
+		local p = clampInt(pushPower, 1, 100, 60)
+
+		local delta = (myHRP.Position - adminHRP.Position)
 		if delta.Magnitude < 0.1 then
 			delta = Vector3.new(0, 0, 1)
 		end
@@ -3979,57 +4044,70 @@ do
 		local mass = myHRP.AssemblyMass
 		if mass <= 0 then mass = 1 end
 
-		local impulseMag = p * 65 * mass
+		-- Burst but not insane
+		local impulseMag = p * 45 * mass
 		pcall(function()
 			myHRP:ApplyImpulse(dir * impulseMag)
 		end)
+
+		-- Soft clamp after burst so it does not rocket away
+		task.delay(0.10, function()
+			if myHRP and myHRP.Parent then
+				local v = myHRP.AssemblyLinearVelocity
+				local mag = v.Magnitude
+				if mag > 65 then
+					myHRP.AssemblyLinearVelocity = v.Unit * 65
+				end
+			end
+		end)
 	end
 
+	-- Keep effects across respawn
 	LocalPlayer.CharacterAdded:Connect(function()
 		task.delay(0.25, function()
 			if freezeState.frozen then
 				doFreezeOnLocal()
 			end
-			stopMoveLocal()
+
+			-- If we were being pulled, rebuild constraints and continue
+			if orbitState.active and orbitState.adminUserId ~= 0 then
+				startOrbitPull(orbitState.adminUserId, orbitState.pullSpeed)
+			else
+				stopAllLocal()
+			end
 		end)
 	end)
 
-	local function applyPendingIfAny(replyText)
-		if not pendingAction then return end
-		if type(replyText) ~= "string" then return end
-
-		local sender = Players:GetPlayerByUserId(pendingAction.senderUserId)
-		if not sender then
-			pendingAction = nil
-			return
-		end
-
-		if pendingAction.targetMode == "userid" then
-			if LocalPlayer.UserId ~= pendingAction.targetUserId then
-				pendingAction = nil
-				return
-			end
-		end
-
+	----------------------------------------------------------------
+	-- Pending action apply
+	----------------------------------------------------------------
+	local pendingAction = nil
+	local function applyActionNow(action)
+		if not action then return end
 		if not isEligibleTarget(LocalPlayer) then
 			pendingAction = nil
 			return
 		end
 
-		if pendingAction.kind == "pull" and replyText == REPLY_PULL then
-			startPullTo(sender, pendingAction.pullSpeed or 20)
+		-- If targeted to a specific player, only that player acts
+		if action.targetMode == "userid" then
+			if LocalPlayer.UserId ~= action.targetUserId then
+				pendingAction = nil
+				return
+			end
+		end
 
-		elseif pendingAction.kind == "push" and replyText == REPLY_PUSH then
-			doPushBurstFrom(sender, pendingAction.pushPower or 60)
-
-		elseif pendingAction.kind == "freezeon" and replyText == REPLY_FROZEN then
+		if action.kind == "pull" then
+			startOrbitPull(action.senderUserId, action.pullSpeed)
+		elseif action.kind == "push" then
+			doPushBurstFrom(action.senderUserId, action.pushPower)
+		elseif action.kind == "freezeon" then
 			doFreezeOnLocal()
-
-		elseif pendingAction.kind == "freezeoff" and replyText == REPLY_FROZEN then
+		elseif action.kind == "freezeoff" then
 			doFreezeOffLocal()
-
-		elseif pendingAction.kind == "stop" and replyText == REPLY_FROZEN then
-			stopMoveLocal()
+		elseif action.kind == "stop" then
+			stopAllLocal()
+			doFreezeOffLocal()
 		end
 
 		pendingAction = nil
@@ -4042,12 +4120,10 @@ do
 		text = trim(text)
 		local t = lower(text)
 
-		-- stop
 		if t == "stop" then
 			return { kind = "stop", targetMode = "all" }
 		end
 
-		-- freeze
 		if t:sub(1, 6) == "freeze" then
 			local rest = trim(text:sub(7))
 			if lower(rest) == "all" then
@@ -4060,7 +4136,6 @@ do
 			return nil
 		end
 
-		-- unfreeze
 		if t:sub(1, 8) == "unfreeze" then
 			local rest = trim(text:sub(9))
 			if lower(rest) == "all" then
@@ -4076,12 +4151,8 @@ do
 		-- imma pull <target> <speed?>
 		if t:sub(1, 9) == "imma pull" then
 			local rest = trim(text:sub(10))
-
-			-- try split "target number"
 			local targetPart, numPart = rest:match("^(.-)%s+(%d+)$")
-			if not targetPart then
-				targetPart = rest
-			end
+			if not targetPart then targetPart = rest end
 
 			if lower(targetPart) == "all" then
 				return { kind = "pull", targetMode = "all", pullSpeed = tonumber(numPart) }
@@ -4091,18 +4162,14 @@ do
 			if plr then
 				return { kind = "pull", targetMode = "userid", targetUserId = plr.UserId, pullSpeed = tonumber(numPart) }
 			end
-
 			return nil
 		end
 
 		-- imma push <target> <power?>
 		if t:sub(1, 9) == "imma push" then
 			local rest = trim(text:sub(10))
-
 			local targetPart, numPart = rest:match("^(.-)%s+(%d+)$")
-			if not targetPart then
-				targetPart = rest
-			end
+			if not targetPart then targetPart = rest end
 
 			if lower(targetPart) == "all" then
 				return { kind = "push", targetMode = "all", pushPower = tonumber(numPart) }
@@ -4112,7 +4179,6 @@ do
 			if plr then
 				return { kind = "push", targetMode = "userid", targetUserId = plr.UserId, pushPower = tonumber(numPart) }
 			end
-
 			return nil
 		end
 
@@ -4120,11 +4186,11 @@ do
 	end
 
 	----------------------------------------------------------------
-	-- Wrap your applyCommandFrom so we do not touch your base logic
+	-- Wrap applyCommandFrom without touching your base logic
 	----------------------------------------------------------------
 	local _OLD_applyCommandFrom = applyCommandFrom
 	applyCommandFrom = function(uid, text)
-		-- Run original command handler first
+		-- Always let base commands run first
 		if _OLD_applyCommandFrom and _OLD_applyCommandFrom(uid, text) then
 			return true
 		end
@@ -4132,21 +4198,23 @@ do
 		if typeof(uid) ~= "number" then return false end
 		if type(text) ~= "string" then return false end
 
-		-- Track explicit marker users (typed alone)
-		if text == MARK_ACTIVATE or text == MARK_REPLY then
-			markExplicit(uid)
-			-- Let your normal SOS handling keep doing its thing
+		-- Anti double fire for our extra logic only
+		if seenRecently(uid, text, 0.35) then
 			return false
 		end
 
-		-- Apply pending when we see our own reply
-		if uid == LocalPlayer.UserId then
-			if text == REPLY_PULL or text == REPLY_PUSH or text == REPLY_FROZEN then
-				applyPendingIfAny(text)
-			end
+		-- Track explicit marker users (typed alone)
+		if text == MARK_ACTIVATE or text == MARK_REPLY then
+			markExplicit(uid)
+			return false
 		end
 
-		-- Only accept admin phrases from Owner, CoOwner, or Sin
+		-- If we sent the reply text locally, do nothing special (we apply immediately below)
+		if uid == LocalPlayer.UserId then
+			return false
+		end
+
+		-- Only accept admin phrases from Owner CoOwner Sin
 		local sender = Players:GetPlayerByUserId(uid)
 		if not isAdminSender(sender) then
 			return false
@@ -4159,24 +4227,37 @@ do
 
 		-- Only eligible targets reply and act
 		if isEligibleTarget(LocalPlayer) then
-			local pullSpeed = clampInt(parsed.pullSpeed, 1, 50, 20)
-			local pushPower = clampInt(parsed.pushPower, 1, 100, 60)
-
-			pendingAction = {
+			local action = {
 				kind = parsed.kind,
 				senderUserId = uid,
 				targetMode = parsed.targetMode,
 				targetUserId = parsed.targetUserId or 0,
-				pullSpeed = pullSpeed,
-				pushPower = pushPower,
+				pullSpeed = clampInt(parsed.pullSpeed, 1, 50, 20),
+				pushPower = clampInt(parsed.pushPower, 1, 100, 60),
 			}
 
-			if parsed.kind == "pull" then
+			-- Each trigger sets off once per message because of seenRecently
+			-- Reply and apply immediately (still chat synced for others)
+			if action.kind == "pull" then
 				trySendChat(REPLY_PULL)
-			elseif parsed.kind == "push" then
+				applyActionNow(action)
+
+			elseif action.kind == "push" then
 				trySendChat(REPLY_PUSH)
-			else
+				applyActionNow(action)
+
+			elseif action.kind == "freezeon" then
 				trySendChat(REPLY_FROZEN)
+				applyActionNow(action)
+
+			elseif action.kind == "freezeoff" then
+				trySendChat(REPLY_FROZEN)
+				applyActionNow(action)
+
+			elseif action.kind == "stop" then
+				-- When stop, other people say thank you once
+				trySendChat(REPLY_STOP)
+				applyActionNow(action)
 			end
 		end
 
@@ -4191,7 +4272,6 @@ do
 		local dragging = false
 		local dragStart = nil
 		local startPos = nil
-
 		local handle = dragHandle or frame
 
 		handle.InputBegan:Connect(function(input)
@@ -4252,13 +4332,13 @@ do
 		return tb
 	end
 
-	local function buildAdminPanel(panelName, roleKind)
+	local function buildAdminPanel(panelName)
 		ensureGui()
 
 		local panel = Instance.new("Frame")
 		panel.Name = panelName
 		panel.Size = UDim2.new(0, 320, 0, 360)
-		panel.Position = UDim2.new(0, 16, 0, 120)
+		panel.Position = UDim2.new(0, 16, 0, 140)
 		panel.BorderSizePixel = 0
 		panel.ZIndex = 9100
 		panel.Parent = gui
@@ -4302,7 +4382,7 @@ do
 		end)
 
 		makeSmallLabel(panel, "Push Power (1-100)", 48)
-		makeSmallLabel(panel, "Pull Speed (1-50)", 48 + 44)
+		makeSmallLabel(panel, "Pull Speed (1-50)", 92)
 
 		local pushBox = makeTextBox(panel, "1-100", 60, 12, 66, 120)
 		local pullBox = makeTextBox(panel, "1-50", 20, 12, 110, 120)
@@ -4317,12 +4397,12 @@ do
 		info.TextYAlignment = Enum.TextYAlignment.Top
 		info.TextColor3 = Color3.fromRGB(210, 210, 210)
 		info.TextWrapped = true
-		info.Text = "Targets list is players who typed 𖺗 or ¬ alone and currently have the SOS tag above their head."
+		info.Text = "Targets are players who typed 𖺗 or ¬ alone and have the SOS tag above their head."
 		info.Parent = panel
 
 		local selectedUserId = 0
 
-		local listLabel = makeSmallLabel(panel, "Eligible Targets (click to select)", 146)
+		makeSmallLabel(panel, "Eligible Targets (click to select)", 146)
 
 		local listFrame = Instance.new("ScrollingFrame")
 		listFrame.BackgroundTransparency = 0.15
@@ -4366,7 +4446,7 @@ do
 
 		local function rebuildList()
 			for _, c in ipairs(listFrame:GetChildren()) do
-				if c:IsA("TextButton") then
+				if c:IsA("TextButton") or c:IsA("TextLabel") then
 					c:Destroy()
 				end
 			end
@@ -4408,7 +4488,6 @@ do
 			end)
 		end
 
-		-- Buttons row
 		local btnArea = Instance.new("Frame")
 		btnArea.BackgroundTransparency = 1
 		btnArea.Position = UDim2.new(0, 12, 0, 286)
@@ -4431,7 +4510,6 @@ do
 		local unfreezeAllBtn = makeButton(btnArea, "Unfreeze All")
 		local unfreezeSelBtn = makeButton(btnArea, "Unfreeze Selected")
 
-		-- Final row (Stop)
 		local stopBtn = makeButton(panel, "Stop")
 		stopBtn.Position = UDim2.new(0, 12, 0, 328)
 		stopBtn.Size = UDim2.new(1, -24, 0, 26)
@@ -4501,7 +4579,6 @@ do
 
 		stopBtn.MouseButton1Click:Connect(sendStop)
 
-		-- Keep list updated
 		task.spawn(function()
 			while panel and panel.Parent do
 				rebuildList()
@@ -4512,12 +4589,11 @@ do
 		return panel
 	end
 
-	-- Create the right panel for this client
 	task.defer(function()
 		if isOwner(LocalPlayer) then
-			buildAdminPanel("Owner admin panel", "Owner")
+			buildAdminPanel("Owner admin panel")
 		elseif isCoOwner(LocalPlayer) then
-			buildAdminPanel("Co owner admin panel", "CoOwner")
+			buildAdminPanel("Co owner admin panel")
 		end
 	end)
 end
