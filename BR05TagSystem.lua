@@ -440,7 +440,7 @@ local RoleEffectPresets = {
 		SpinGradient = false,
 		ScrollGradient = true,
 		TopTextColor = Color3.fromRGB(235, 70, 70),
-		BottomTextColor = Color3.fromRGB(235, 235, 235),
+		BottomTextColor = YELLOW,
 		Effects = { "Scanline", "Shimmer" },
 	},
 	Tester = {
